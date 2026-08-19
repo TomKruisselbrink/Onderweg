@@ -97,20 +97,112 @@
     </div>
     <form id="entryForm" class="entry-form">
       <div class="type-picker" id="typePicker">
-        <button type="button" class="type-chip" data-type="plek">📍<span>Plek</span></button>
-        <button type="button" class="type-chip" data-type="eten">🍴<span>Eten</span></button>
-        <button type="button" class="type-chip" data-type="activiteit">🎒<span>Activiteit</span></button>
-        <button type="button" class="type-chip" data-type="overnachting">🛏️<span>Slapen</span></button>
-        <button type="button" class="type-chip" data-type="vervoer">🚗<span>Onderweg</span></button>
+        <button type="button" class="type-chip" data-type="eten">🍴<span>Eten & Drinken</span></button>
+        <button type="button" class="type-chip" data-type="plek">📍<span>Plek / Activiteit</span></button>
+        <button type="button" class="type-chip" data-type="slaap">🛏️<span>Slaapplek</span></button>
+        <button type="button" class="type-chip" data-type="vervoer">🚗<span>Verplaatsing</span></button>
       </div>
 
       <label class="field">
-        <span>Titel</span>
-        <input type="text" id="fTitle" placeholder="Bijv. Tapasbar bij de haven" required>
+        <span id="titleLabel">Naam / locatie</span>
+        <input type="text" id="fTitle" placeholder="Bijv. Trattoria da Luigi, Rome" required>
       </label>
 
+      <!-- EETEN & DRINKEN -->
+      <div class="type-fields" data-for="eten">
+        <div class="field">
+          <span>Maaltijd</span>
+          <div class="chip-row" id="mealTypeRow">
+            <button type="button" class="pill-chip" data-value="ontbijt">🥐 Ontbijt</button>
+            <button type="button" class="pill-chip" data-value="lunch">🥪 Lunch</button>
+            <button type="button" class="pill-chip" data-value="diner">🍽️ Diner</button>
+            <button type="button" class="pill-chip" data-value="snack">☕ Snack/Koffie</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>Tag</span>
+          <div class="chip-row" id="quickTagRow">
+            <button type="button" class="pill-chip" data-value="delicatesse">Lokale delicatesse</button>
+            <button type="button" class="pill-chip" data-value="aanrader">Aanrader</button>
+            <button type="button" class="pill-chip" data-value="touristtrap">Tourist trap</button>
+            <button type="button" class="pill-chip" data-value="koffie">Aanrader voor koffie</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PLEK / ACTIVITEIT -->
+      <div class="type-fields" data-for="plek">
+        <div class="field">
+          <span>Soort plek</span>
+          <div class="chip-row" id="placeTypeRow">
+            <button type="button" class="pill-chip" data-value="natuur">🌿 Natuur</button>
+            <button type="button" class="pill-chip" data-value="cultuur">🏛️ Cultuur</button>
+            <button type="button" class="pill-chip" data-value="stad">🏘️ Stad/Dorp</button>
+            <button type="button" class="pill-chip" data-value="parel">💎 Verborgen parel</button>
+          </div>
+        </div>
+        <label class="checkbox-field">
+          <input type="checkbox" id="fHighlight">
+          <span>🏆 Op de "Beste van de reis"-lijst</span>
+        </label>
+      </div>
+
+      <!-- SLAAPPLEK -->
+      <div class="type-fields" data-for="slaap">
+        <div class="field">
+          <span>Type overnachting</span>
+          <div class="chip-row" id="stayTypeRow">
+            <button type="button" class="pill-chip" data-value="camping">⛺ Camping/Tent</button>
+            <button type="button" class="pill-chip" data-value="hotel">🏨 Hotel/B&B</button>
+            <button type="button" class="pill-chip" data-value="camper">🚐 Camper/Bus</button>
+            <button type="button" class="pill-chip" data-value="overig">🚂 Nachttrein/Overig</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>Snelbeoordeling</span>
+          <div class="checkbox-grid">
+            <label class="checkbox-field"><input type="checkbox" id="chkGoedBed"><span>Goed bed</span></label>
+            <label class="checkbox-field"><input type="checkbox" id="chkUitzicht"><span>Mooi uitzicht</span></label>
+            <label class="checkbox-field"><input type="checkbox" id="chkDouche"><span>Lekkere douche</span></label>
+            <label class="checkbox-field"><input type="checkbox" id="chkLawaai"><span>Lawaai/rumoerig</span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- VERPLAATSING -->
+      <div class="type-fields" data-for="vervoer">
+        <div class="field-row">
+          <label class="field"><span>Van</span><input type="text" id="fFrom" placeholder="Vertrekpunt"></label>
+          <label class="field"><span>Naar</span><input type="text" id="fTo" placeholder="Bestemming"></label>
+        </div>
+        <div class="field">
+          <span>Vervoersmiddel</span>
+          <div class="chip-row" id="transportRow">
+            <button type="button" class="pill-chip" data-value="auto">🚗 Auto</button>
+            <button type="button" class="pill-chip" data-value="trein">🚆 Trein</button>
+            <button type="button" class="pill-chip" data-value="vliegtuig">✈️ Vliegtuig</button>
+            <button type="button" class="pill-chip" data-value="boot">⛴️ Boot</button>
+            <button type="button" class="pill-chip" data-value="fiets">🚴 Benenwagen/Fiets</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- BEOORDELING (gedeeld door eten / plek / slaap) -->
+      <div class="type-fields" data-for="eten plek slaap">
+        <div class="field">
+          <span id="ratingFieldLabel">Beoordeling</span>
+          <div class="star-picker" id="ratingPicker">
+            <button type="button" class="star-btn" data-value="1">★</button>
+            <button type="button" class="star-btn" data-value="2">★</button>
+            <button type="button" class="star-btn" data-value="3">★</button>
+            <button type="button" class="star-btn" data-value="4">★</button>
+            <button type="button" class="star-btn" data-value="5">★</button>
+          </div>
+        </div>
+      </div>
+
       <label class="field">
-        <span>Aantekening</span>
+        <span id="noteLabel">Aantekening</span>
         <textarea id="fNote" rows="3" placeholder="Wat maakte dit bijzonder?"></textarea>
       </label>
 

@@ -14,6 +14,7 @@
   --font-mono: 'Space Mono', monospace;
 }
 
+html{touch-action:manipulation;}
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{
@@ -164,6 +165,13 @@ main{
   display:inline-flex;align-items:center;justify-content:center;
   font-size:9px; color:#fff; font-weight:700;
 }
+.postcard__badges{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.badge{
+  font-size:11px; padding:3px 9px; border-radius:12px; font-family:var(--font-mono);
+  background:var(--paper-2); color:var(--jade-dark); border:1px solid var(--line);
+}
+.badge--highlight{ background:var(--gold); color:var(--ink); border-color:var(--gold); }
+.postcard__stars{ color:var(--gold); font-size:13px; letter-spacing:1px; }
 .postcard__photos{
   display:flex; gap:6px; margin-top:10px; overflow-x:auto;
 }
@@ -223,6 +231,35 @@ main.is-empty .timeline{display:none;}
 .type-chip span{font-size:10px; font-family:var(--font-mono); text-transform:uppercase;}
 .type-chip.is-active{
   border-color:var(--jade); background:#e4ede9;
+}
+
+.type-fields{ margin-top:-6px; }
+.type-fields[hidden]{ display:none; }
+
+.chip-row{ display:flex; flex-wrap:wrap; gap:8px; }
+.pill-chip{
+  background:var(--paper-2); border:1.5px solid var(--line); border-radius:20px;
+  padding:8px 13px; font-size:13px; color:var(--ink);
+}
+.pill-chip.is-active{
+  background:var(--jade); border-color:var(--jade); color:#fff;
+}
+
+.star-picker{ display:flex; gap:4px; }
+.star-btn{
+  background:none; border:none; font-size:28px; line-height:1;
+  color:rgba(22,48,43,0.2); padding:2px;
+}
+.star-btn.is-filled{ color:var(--gold); }
+
+.checkbox-field{
+  display:flex; align-items:center; gap:8px; font-size:13.5px;
+  background:var(--paper-2); border:1.5px solid var(--line); border-radius:10px;
+  padding:10px 12px;
+}
+.checkbox-field input{ width:17px; height:17px; accent-color:var(--jade); }
+.checkbox-grid{
+  display:grid; grid-template-columns:1fr 1fr; gap:8px;
 }
 
 .entry-form{display:flex; flex-direction:column; gap:16px;}

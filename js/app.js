@@ -32,7 +32,28 @@ function resetEntryForm() {
   document.querySelectorAll('.type-chip').forEach(c => c.classList.remove('is-active'));
   document.querySelector('.type-chip[data-type="plek"]').classList.add('is-active');
   selectedType = 'plek';
+
+  document.querySelectorAll('.pill-chip').forEach(c => c.classList.remove('is-active'));
+  pendingMealType = null; pendingQuickTag = null; pendingPlaceType = null;
+  pendingStayType = null; pendingTransportMode = null;
+  pendingRating = 0;
+  renderStarPicker();
+  document.getElementById('fHighlight').checked = false;
+  document.getElementById('chkGoedBed').checked = false;
+  document.getElementById('chkUitzicht').checked = false;
+  document.getElementById('chkDouche').checked = false;
+  document.getElementById('chkLawaai').checked = false;
+  document.getElementById('fFrom').value = '';
+  document.getElementById('fTo').value = '';
+
+  updateTypeFields();
   prefillDateTime();
+}
+
+function setChipActive(rowId, value) {
+  document.querySelectorAll(`#${rowId} .pill-chip`).forEach((c) => {
+    c.classList.toggle('is-active', c.dataset.value === value);
+  });
 }
 
 function editEntry(entry) {
@@ -41,8 +62,9 @@ function editEntry(entry) {
   editingCreatedAt = entry.createdAt;
   closeModal();
 
-  selectedType = entry.type;
-  document.querySelectorAll('.type-chip').forEach(c => c.classList.toggle('is-active', c.dataset.type === entry.type));
+  const type = normType(entry.type);
+  selectedType = type;
+  document.querySelectorAll('.type-chip').forEach(c => c.classList.toggle('is-active', c.dataset.type === type));
   document.getElementById('fTitle').value = entry.title;
   document.getElementById('fNote').value = entry.note || '';
   document.getElementById('fDate').value = entry.timestamp.slice(0, 10);
@@ -58,6 +80,31 @@ function editEntry(entry) {
     : '';
   document.getElementById('addressResults').innerHTML = '';
 
+  // categorie-specifieke velden
+  document.querySelectorAll('.pill-chip').forEach(c => c.classList.remove('is-active'));
+  pendingMealType = entry.mealType || null;
+  pendingQuickTag = entry.quickTag || null;
+  pendingPlaceType = entry.placeType || null;
+  pendingStayType = entry.stayType || null;
+  pendingTransportMode = entry.transportMode || null;
+  if (pendingMealType) setChipActive('mealTypeRow', pendingMealType);
+  if (pendingQuickTag) setChipActive('quickTagRow', pendingQuickTag);
+  if (pendingPlaceType) setChipActive('placeTypeRow', pendingPlaceType);
+  if (pendingStayType) setChipActive('stayTypeRow', pendingStayType);
+  if (pendingTransportMode) setChipActive('transportRow', pendingTransportMode);
+
+  pendingRating = entry.rating || 0;
+  renderStarPicker();
+  document.getElementById('fHighlight').checked = !!entry.highlight;
+  const checks = entry.checks || {};
+  document.getElementById('chkGoedBed').checked = !!checks.goedBed;
+  document.getElementById('chkUitzicht').checked = !!checks.uitzicht;
+  document.getElementById('chkDouche').checked = !!checks.douche;
+  document.getElementById('chkLawaai').checked = !!checks.lawaai;
+  document.getElementById('fFrom').value = entry.fromPlace || '';
+  document.getElementById('fTo').value = entry.toPlace || '';
+
+  updateTypeFields();
   document.getElementById('nieuwHeading').textContent = 'Moment wijzigen';
   document.getElementById('btnSaveEntry').textContent = 'Wijzigingen opslaan';
   showView('view-nieuw');
@@ -162,17 +209,86 @@ function toast(msg) {
 
 // ---------- Type picker ----------
 let selectedType = 'plek';
+
+const TYPE_ICON = { plek: '📍', eten: '🍴', slaap: '🛏️', vervoer: '🚗' };
+const TYPE_LABEL = { plek: 'Plek / Activiteit', eten: 'Eten & Drinken', slaap: 'Slaapplek', vervoer: 'Verplaatsing' };
+const TYPE_COLOR = { plek: '#2B6E63', eten: '#D6A419', slaap: '#B23A2E', vervoer: '#5B6EA8' };
+// oudere data (voor het uitbreiden van de app) blijft leesbaar door 'm op een nieuwe categorie te mappen
+const LEGACY_TYPE_MAP = { activiteit: 'plek', overnachting: 'slaap' };
+function normType(type) { return LEGACY_TYPE_MAP[type] || type; }
+
+const MEAL_LABEL = { ontbijt: '🥐 Ontbijt', lunch: '🥪 Lunch', diner: '🍽️ Diner', snack: '☕ Snack/Koffie' };
+const TAG_LABEL = { delicatesse: 'Lokale delicatesse', aanrader: 'Aanrader', touristtrap: 'Tourist trap', koffie: 'Aanrader voor koffie' };
+const PLACE_LABEL = { natuur: '🌿 Natuur', cultuur: '🏛️ Cultuur', stad: '🏘️ Stad/Dorp', parel: '💎 Verborgen parel' };
+const STAY_LABEL = { camping: '⛺ Camping/Tent', hotel: '🏨 Hotel/B&B', camper: '🚐 Camper/Bus', overig: '🚂 Nachttrein/Overig' };
+const TRANSPORT_LABEL = { auto: '🚗 Auto', trein: '🚆 Trein', vliegtuig: '✈️ Vliegtuig', boot: '⛴️ Boot', fiets: '🚴 Benenwagen/Fiets' };
+
+const TITLE_PLACEHOLDER = {
+  eten: 'Bijv. Trattoria da Luigi, Rome',
+  plek: 'Bijv. Uitzichtpunt Tre Cime',
+  slaap: 'Bijv. Camping Le Pin, Provence',
+  vervoer: 'Bijv. Rit naar Rome'
+};
+const NOTE_PLACEHOLDER = {
+  eten: 'Wat heb je gegeten en gedronken?',
+  plek: 'Sfeer, verhalen of praktische tips',
+  slaap: 'Toelichting voor als je er ooit terug wil',
+  vervoer: 'Bijv. "Prachtige bergpas" of "vertraging gehad"'
+};
+
+function updateTypeFields() {
+  document.querySelectorAll('.type-fields[data-for]').forEach((sec) => {
+    sec.hidden = !sec.dataset.for.split(' ').includes(selectedType);
+  });
+  document.getElementById('titleLabel').textContent = selectedType === 'vervoer' ? 'Naam / omschrijving rit' : 'Naam / locatie';
+  document.getElementById('fTitle').placeholder = TITLE_PLACEHOLDER[selectedType];
+  document.getElementById('noteLabel').textContent = selectedType === 'vervoer' ? 'Karakter van de rit' : 'Aantekening';
+  document.getElementById('fNote').placeholder = NOTE_PLACEHOLDER[selectedType];
+  document.getElementById('ratingFieldLabel').textContent = selectedType === 'slaap' ? 'Slaapscore' : 'Beoordeling';
+}
+
 document.querySelectorAll('.type-chip').forEach(chip => {
   chip.addEventListener('click', () => {
     document.querySelectorAll('.type-chip').forEach(c => c.classList.remove('is-active'));
     chip.classList.add('is-active');
     selectedType = chip.dataset.type;
+    updateTypeFields();
   });
 });
 document.querySelector('.type-chip[data-type="plek"]').classList.add('is-active');
 
-const TYPE_ICON = { plek: '📍', eten: '🍴', activiteit: '🎒', overnachting: '🛏️', vervoer: '🚗' };
-const TYPE_LABEL = { plek: 'Plek', eten: 'Eten', activiteit: 'Activiteit', overnachting: 'Slapen', vervoer: 'Onderweg' };
+// ---------- Chips (maaltijd/tag/plek-soort/overnachting/vervoer) ----------
+let pendingMealType = null, pendingQuickTag = null, pendingPlaceType = null,
+    pendingStayType = null, pendingTransportMode = null;
+
+document.querySelectorAll('.pill-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const row = chip.closest('.chip-row');
+    const wasActive = chip.classList.contains('is-active');
+    row.querySelectorAll('.pill-chip').forEach((c) => c.classList.remove('is-active'));
+    if (!wasActive) chip.classList.add('is-active');
+    pendingMealType = document.querySelector('#mealTypeRow .pill-chip.is-active')?.dataset.value || null;
+    pendingQuickTag = document.querySelector('#quickTagRow .pill-chip.is-active')?.dataset.value || null;
+    pendingPlaceType = document.querySelector('#placeTypeRow .pill-chip.is-active')?.dataset.value || null;
+    pendingStayType = document.querySelector('#stayTypeRow .pill-chip.is-active')?.dataset.value || null;
+    pendingTransportMode = document.querySelector('#transportRow .pill-chip.is-active')?.dataset.value || null;
+  });
+});
+
+// ---------- Ster-beoordeling ----------
+let pendingRating = 0;
+function renderStarPicker() {
+  document.querySelectorAll('#ratingPicker .star-btn').forEach((b) => {
+    b.classList.toggle('is-filled', Number(b.dataset.value) <= pendingRating);
+  });
+}
+document.getElementById('ratingPicker').addEventListener('click', (e) => {
+  const btn = e.target.closest('.star-btn');
+  if (!btn) return;
+  const val = Number(btn.dataset.value);
+  pendingRating = (pendingRating === val) ? 0 : val;
+  renderStarPicker();
+});
 
 function prefillDateTime() {
   const now = new Date();
@@ -309,6 +425,30 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     author: isEdit ? editingAuthor : author,
     createdAt: isEdit ? editingCreatedAt : new Date().toISOString()
   };
+
+  if (selectedType === 'eten') {
+    entry.mealType = pendingMealType;
+    entry.quickTag = pendingQuickTag;
+    entry.rating = pendingRating || null;
+  } else if (selectedType === 'plek') {
+    entry.placeType = pendingPlaceType;
+    entry.highlight = document.getElementById('fHighlight').checked;
+    entry.rating = pendingRating || null;
+  } else if (selectedType === 'slaap') {
+    entry.stayType = pendingStayType;
+    entry.rating = pendingRating || null;
+    entry.checks = {
+      goedBed: document.getElementById('chkGoedBed').checked,
+      uitzicht: document.getElementById('chkUitzicht').checked,
+      douche: document.getElementById('chkDouche').checked,
+      lawaai: document.getElementById('chkLawaai').checked
+    };
+  } else if (selectedType === 'vervoer') {
+    entry.fromPlace = document.getElementById('fFrom').value.trim();
+    entry.toPlace = document.getElementById('fTo').value.trim();
+    entry.transportMode = pendingTransportMode;
+  }
+
   await VakantieDB.put(entry);
   toast(isEdit ? 'Moment bijgewerkt ✓' : 'Moment bewaard ✓');
 
@@ -364,20 +504,46 @@ function renderTimeline() {
   });
 }
 
+function renderBadges(entry) {
+  const type = normType(entry.type);
+  const badges = [];
+  if (entry.rating) badges.push(`<span class="postcard__stars">${'★'.repeat(entry.rating)}${'☆'.repeat(5 - entry.rating)}</span>`);
+  if (type === 'eten') {
+    if (entry.mealType) badges.push(`<span class="badge">${MEAL_LABEL[entry.mealType] || entry.mealType}</span>`);
+    if (entry.quickTag) badges.push(`<span class="badge">${TAG_LABEL[entry.quickTag] || entry.quickTag}</span>`);
+  } else if (type === 'plek') {
+    if (entry.placeType) badges.push(`<span class="badge">${PLACE_LABEL[entry.placeType] || entry.placeType}</span>`);
+    if (entry.highlight) badges.push(`<span class="badge badge--highlight">🏆 Beste van de reis</span>`);
+  } else if (type === 'slaap') {
+    if (entry.stayType) badges.push(`<span class="badge">${STAY_LABEL[entry.stayType] || entry.stayType}</span>`);
+    const c = entry.checks || {};
+    if (c.goedBed) badges.push('<span class="badge">Goed bed</span>');
+    if (c.uitzicht) badges.push('<span class="badge">Mooi uitzicht</span>');
+    if (c.douche) badges.push('<span class="badge">Lekkere douche</span>');
+    if (c.lawaai) badges.push('<span class="badge">Lawaai/rumoerig</span>');
+  } else if (type === 'vervoer') {
+    if (entry.fromPlace || entry.toPlace) badges.push(`<span class="badge">${escapeHtml(entry.fromPlace || '?')} → ${escapeHtml(entry.toPlace || '?')}</span>`);
+    if (entry.transportMode) badges.push(`<span class="badge">${TRANSPORT_LABEL[entry.transportMode] || entry.transportMode}</span>`);
+  }
+  return badges.length ? `<div class="postcard__badges">${badges.join('')}</div>` : '';
+}
+
 function renderPostcard(entry) {
   const el = document.createElement('article');
   el.className = 'postcard';
   el.dataset.id = entry.id;
   const color = authorColor(entry.author);
   const initial = entry.author.slice(0, 1).toUpperCase();
+  const type = normType(entry.type);
   el.innerHTML = `
     <div class="postcard__tape"></div>
     <div class="postcard__top">
-      <span class="postcard__type">${TYPE_ICON[entry.type] || '📍'}</span>
+      <span class="postcard__type">${TYPE_ICON[type] || '📍'}</span>
       <h3 class="postcard__title">${escapeHtml(entry.title)}</h3>
       <span class="postcard__stamp">${fmtStamp(entry.timestamp)}</span>
     </div>
     ${entry.note ? `<p class="postcard__note">${escapeHtml(entry.note)}</p>` : ''}
+    ${renderBadges(entry)}
     ${entry.photos && entry.photos.length ? `<div class="postcard__photos">${entry.photos.map(p => `<img src="${p}">`).join('')}</div>` : ''}
     <div class="postcard__meta">
       <span class="author-dot" style="background:${color}">${initial}</span>
@@ -398,11 +564,14 @@ function escapeHtml(str) {
 function openEntryModal(entry) {
   const modal = document.getElementById('entryModal');
   const card = document.getElementById('entryModalCard');
+  const type = normType(entry.type);
   card.innerHTML = `
-    <h3 style="font-family:var(--font-display);margin:0 0 4px;">${TYPE_ICON[entry.type]} ${escapeHtml(entry.title)}</h3>
+    <h3 style="font-family:var(--font-display);margin:0 0 4px;">${TYPE_ICON[type]} ${escapeHtml(entry.title)}</h3>
     <p style="font-family:var(--font-mono);font-size:11px;color:#7c8580;margin:0 0 12px;">
-      ${TYPE_LABEL[entry.type]} · ${entry.author} · ${new Date(entry.timestamp).toLocaleString('nl-NL')}
+      ${TYPE_LABEL[type]} · ${entry.author} · ${new Date(entry.timestamp).toLocaleString('nl-NL')}
     </p>
+    ${renderBadges(entry)}
+    ${type === 'vervoer' && (entry.fromPlace || entry.toPlace) ? `<p style="font-size:13px;margin:8px 0 0;">${escapeHtml(entry.fromPlace || '?')} → ${escapeHtml(entry.toPlace || '?')}</p>` : ''}
     ${entry.note ? `<p style="line-height:1.6;">${escapeHtml(entry.note)}</p>` : ''}
     ${(entry.photos || []).map(p => `<img src="${p}">`).join('')}
     ${entry.lat ? `<p style="font-size:12px;color:#7c8580;">📍 ${entry.locationName ? escapeHtml(entry.locationName) : entry.lat.toFixed(5) + ', ' + entry.lng.toFixed(5)}</p>` : ''}
@@ -446,16 +615,16 @@ function renderDashboard() {
   empty.hidden = true;
   content.hidden = false;
 
-  // Statistieken (zelfde berekening als Overzicht)
+  // Statistieken — 📍 plekken · 🍴 maaltijden · 🛏️ nachtjes, zoals gevraagd
   const grid = document.getElementById('dashStats');
-  const days = new Set(allEntries.map(e => e.timestamp.slice(0, 10))).size;
-  const photos = allEntries.reduce((n, e) => n + (e.photos ? e.photos.length : 0), 0);
-  const eten = allEntries.filter(e => e.type === 'eten').length;
+  const plekken = allEntries.filter(e => normType(e.type) === 'plek').length;
+  const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
+  const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
   grid.innerHTML = `
-    <div class="stat-card"><b>${days}</b><span>Dagen vastgelegd</span></div>
-    <div class="stat-card"><b>${allEntries.length}</b><span>Momenten</span></div>
-    <div class="stat-card"><b>${photos}</b><span>Foto's</span></div>
-    <div class="stat-card"><b>${eten}</b><span>Eetmomenten</span></div>
+    <div class="stat-card"><b>${plekken}</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card"><b>${maaltijden}</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card"><b>${nachtjes}</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card"><b>${allEntries.length}</b><span>Momenten totaal</span></div>
   `;
 
   // Volgende halte: eerstvolgende moment met een datum in de toekomst
@@ -466,11 +635,12 @@ function renderDashboard() {
   const wrap = document.getElementById('nextStopWrap');
   if (future.length) {
     const next = future[0];
+    const nextType = normType(next.type);
     const daysUntil = Math.ceil((new Date(next.timestamp) - now) / (1000 * 60 * 60 * 24));
     wrap.innerHTML = `
       <div class="next-stop-card">
         <p class="next-stop-card__eyebrow">Volgende halte</p>
-        <p class="next-stop-card__title">${TYPE_ICON[next.type]} ${escapeHtml(next.title)}</p>
+        <p class="next-stop-card__title">${TYPE_ICON[nextType]} ${escapeHtml(next.title)}</p>
         <p class="next-stop-card__meta">${next.locationName ? escapeHtml(next.locationName.split(',').slice(0, 2).join(',')) : fmtDayHeading(next.timestamp.slice(0, 10))}</p>
         <p class="next-stop-card__count">over ${daysUntil} dag${daysUntil === 1 ? '' : 'en'}</p>
       </div>`;
@@ -510,8 +680,9 @@ function renderDashMap() {
   dashMapLayer.clearLayers();
   const latlngs = [];
   withLoc.forEach((entry, i) => {
+    const type = normType(entry.type);
     const icon = L.divIcon({
-      className: '', html: `<div class="map-pin-num">${i + 1}</div>`,
+      className: '', html: `<div class="map-pin-num" style="background:${TYPE_COLOR[type] || 'var(--jade)'}">${i + 1}</div>`,
       iconSize: [22, 22], iconAnchor: [11, 11]
     });
     L.marker([entry.lat, entry.lng], { icon }).addTo(dashMapLayer);
@@ -544,13 +715,14 @@ function renderMap() {
 
   const latlngs = [];
   withLoc.forEach((entry, i) => {
+    const type = normType(entry.type);
     const icon = L.divIcon({
       className: '',
-      html: `<div class="map-pin-num">${i + 1}</div>`,
+      html: `<div class="map-pin-num" style="background:${TYPE_COLOR[type] || 'var(--jade)'}">${i + 1}</div>`,
       iconSize: [26, 26], iconAnchor: [13, 13]
     });
     const marker = L.marker([entry.lat, entry.lng], { icon }).addTo(mapLayer);
-    marker.bindPopup(`<b>${TYPE_ICON[entry.type]} ${escapeHtml(entry.title)}</b><br>${fmtStamp(entry.timestamp)} · ${entry.author}${entry.locationName ? '<br>' + escapeHtml(entry.locationName) : ''}`);
+    marker.bindPopup(`<b>${TYPE_ICON[type]} ${escapeHtml(entry.title)}</b><br>${fmtStamp(entry.timestamp)} · ${entry.author}${entry.locationName ? '<br>' + escapeHtml(entry.locationName) : ''}`);
     latlngs.push([entry.lat, entry.lng]);
   });
   L.polyline(latlngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(mapLayer);
@@ -562,13 +734,17 @@ function renderStats() {
   const grid = document.getElementById('statsGrid');
   const days = new Set(allEntries.map(e => e.timestamp.slice(0, 10))).size;
   const photos = allEntries.reduce((n, e) => n + (e.photos ? e.photos.length : 0), 0);
-  const eten = allEntries.filter(e => e.type === 'eten').length;
-  const plekken = allEntries.filter(e => e.type === 'plek' || e.lat).length;
+  const plekken = allEntries.filter(e => normType(e.type) === 'plek').length;
+  const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
+  const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
+  const highlights = allEntries.filter(e => e.highlight).length;
   grid.innerHTML = `
+    <div class="stat-card"><b>${plekken}</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card"><b>${maaltijden}</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card"><b>${nachtjes}</b><span>🛏️ Nachtjes geslapen</span></div>
     <div class="stat-card"><b>${days}</b><span>Dagen vastgelegd</span></div>
-    <div class="stat-card"><b>${allEntries.length}</b><span>Momenten</span></div>
     <div class="stat-card"><b>${photos}</b><span>Foto's</span></div>
-    <div class="stat-card"><b>${eten}</b><span>Eetmomenten</span></div>
+    <div class="stat-card"><b>${highlights}</b><span>🏆 Beste van de reis</span></div>
   `;
 }
 
@@ -635,6 +811,7 @@ if ('serviceWorker' in navigator) {
 
 // ---------- Start ----------
 prefillDateTime();
+updateTypeFields();
 askAuthor(false);
 updateWhoButton();
 renderAll();
