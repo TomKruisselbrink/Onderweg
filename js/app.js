@@ -4,7 +4,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult,
-  signInAnonymously, onAuthStateChanged, signOut
+  signInAnonymously, onAuthStateChanged, signOut, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, collection,
@@ -123,11 +123,15 @@ document.getElementById('obJoinTrip').addEventListener('click', async () => {
 
 document.getElementById('obFollowGo').addEventListener('click', async () => {
   obClearError();
+  const name = document.getElementById('obFollowNameInput').value.trim();
   const code = document.getElementById('obFollowCodeInput').value.trim().toUpperCase();
+  if (!name) { obShowError('Vul je naam in, zodat je herkenbaar bent als je reageert.'); return; }
   if (code.length !== 6) { obShowError('Vul een geldige 6-tekens reiscode in.'); return; }
   obSetLoading(true);
   try {
     if (!currentUser) await signInAnonymously(auth);
+    await updateProfile(auth.currentUser, { displayName: name });
+    currentUser = auth.currentUser;
     const ref = doc(db, 'trips', code);
     const snap = await getDoc(ref);
     if (!snap.exists()) { obSetLoading(false); obShowError('Deze reiscode bestaat niet.'); return; }
@@ -148,7 +152,7 @@ async function enterApp(code, role) {
   const tripName = tripSnap.exists() ? tripSnap.data().name : 'Jut en Juul op vakantie';
 
   document.getElementById('tripTitle').textContent = tripName;
-  document.getElementById('tripSub').textContent = role === 'follower' ? 'je kijkt mee — alleen lezen' : 'jullie reisdagboek';
+  document.getElementById('tripSub').textContent = role === 'follower' ? 'je kijkt mee en kunt reageren' : 'jullie reisdagboek';
   document.getElementById('tripCodeDisplay').textContent = code;
 
   document.getElementById('fabNieuw').style.display = role === 'follower' ? 'none' : '';
@@ -158,10 +162,12 @@ async function enterApp(code, role) {
   document.getElementById('app').hidden = false;
 
   subscribeToEntries(code);
+  subscribeToComments(code);
 }
 
 function leaveTrip() {
   if (unsubscribeEntries) unsubscribeEntries();
+  if (unsubscribeComments) unsubscribeComments();
   localStorage.removeItem('tripCode');
   localStorage.removeItem('tripRole');
   signOut(auth).catch(() => {});
@@ -194,8 +200,10 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
-// ---------- Firestore: entries realtime ----------
+// ---------- Firestore: entries + reacties realtime ----------
 let allEntries = [];
+let allComments = [];
+let unsubscribeComments = null;
 
 function subscribeToEntries(code) {
   if (unsubscribeEntries) unsubscribeEntries();
@@ -211,12 +219,38 @@ function subscribeToEntries(code) {
   });
 }
 
+function subscribeToComments(code) {
+  if (unsubscribeComments) unsubscribeComments();
+  const q = query(collection(db, 'trips', code, 'comments'), orderBy('createdAt'));
+  unsubscribeComments = onSnapshot(q, (snapshot) => {
+    allComments = snapshot.docs.map(d => d.data());
+    renderTimeline();
+  }, (err) => {
+    toast('Synchronisatie-fout (reacties): ' + err.message);
+  });
+}
+
 async function saveEntry(entry) {
   await setDoc(doc(db, 'trips', currentTripCode, 'entries', entry.id), entry);
 }
 async function removeEntry(id) {
   await deleteDoc(doc(db, 'trips', currentTripCode, 'entries', id));
 }
+async function addComment(day, text) {
+  const comment = {
+    id: crypto.randomUUID ? crypto.randomUUID() : 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+    day,
+    text: text.trim(),
+    author: authorName(),
+    authorUid: currentUser.uid,
+    createdAt: new Date().toISOString()
+  };
+  await setDoc(doc(db, 'trips', currentTripCode, 'comments', comment.id), comment);
+}
+async function removeComment(id) {
+  await deleteDoc(doc(db, 'trips', currentTripCode, 'comments', id));
+}
+
 
 // ============================================================
 // MODAL open/sluiten met vloeiende overgang
@@ -341,11 +375,6 @@ function authorColor(name) {
 }
 function updateWhoButton() {
   const btn = document.getElementById('btnWho');
-  if (currentRole === 'follower') {
-    btn.textContent = '👀';
-    btn.style.background = '';
-    return;
-  }
   const name = authorName();
   btn.textContent = name.slice(0, 1).toUpperCase();
   btn.style.background = authorColor(name);
@@ -673,7 +702,61 @@ function renderTimeline() {
     heading.textContent = fmtDayHeading(day);
     container.appendChild(heading);
     groups[day].forEach(entry => container.appendChild(renderPostcard(entry)));
+    container.appendChild(renderDayComments(day));
   });
+}
+
+function renderDayComments(day) {
+  const wrap = document.createElement('div');
+  wrap.className = 'day-comments';
+  const dayComments = allComments.filter(c => c.day === day);
+
+  const list = document.createElement('div');
+  list.className = 'day-comments__list';
+  if (dayComments.length === 0) {
+    list.innerHTML = '<p class="day-comments__empty">Nog geen reacties op deze dag — wees de eerste!</p>';
+  } else {
+    dayComments.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'comment';
+      const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
+      row.innerHTML = `
+        <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
+        <div style="flex:1;">
+          <b>${escapeHtml(c.author)}</b>
+          <p>${escapeHtml(c.text)}</p>
+        </div>
+        ${canRemove ? `<button type="button" class="comment__remove" title="Verwijderen">×</button>` : ''}
+      `;
+      if (canRemove) {
+        row.querySelector('.comment__remove').addEventListener('click', () => removeComment(c.id));
+      }
+      list.appendChild(row);
+    });
+  }
+  wrap.appendChild(list);
+
+  const form = document.createElement('form');
+  form.className = 'day-comments__form';
+  form.innerHTML = `<input type="text" placeholder="Reageer op deze dag…" maxlength="300"><button type="submit">➤</button>`;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await addComment(day, text);
+      input.value = '';
+    } catch (err) {
+      toast('Reageren mislukt: ' + err.message);
+    }
+    input.disabled = false;
+    input.focus();
+  });
+  wrap.appendChild(form);
+
+  return wrap;
 }
 
 function renderBadges(entry) {
