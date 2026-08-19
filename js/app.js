@@ -62,7 +62,6 @@ document.getElementById('obTraveler').addEventListener('click', async () => {
   obClearError();
   obSetLoading(true);
   try {
-    sessionStorage.setItem('pendingRole', 'traveler');
     const provider = new GoogleAuthProvider();
     await signInWithRedirect(auth, provider);
   } catch (err) {
@@ -193,9 +192,12 @@ onAuthStateChanged(auth, (user) => {
     return;
   }
 
-  const pendingRole = sessionStorage.getItem('pendingRole');
-  if (pendingRole === 'traveler' && !user.isAnonymous) {
-    sessionStorage.removeItem('pendingRole');
+  // Let op: we vertrouwen hier bewust NIET op sessionStorage om te onthouden
+  // "wat de gebruiker aan het doen was" vóór de Google-redirect — op iOS (zeker
+  // in een geïnstalleerde app) gaat die informatie soms verloren tijdens het
+  // heen-en-weer-springen naar Google. In plaats daarvan: iedere ingelogde
+  // Google-gebruiker zonder actieve reis krijgt automatisch de reis-stap te zien.
+  if (!user.isAnonymous) {
     obShowStep('obStepTraveler');
   }
 });
