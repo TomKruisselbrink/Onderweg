@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Samenvoegen…</title>
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main style="display:flex; align-items:center; justify-content:center; min-height:100vh; text-align:center;">
+  <div>
+    <p class="empty-state__stamp">bezig</p>
+    <p id="shareStatus" style="margin-top:14px; font-size:15px;">Momenten worden samengevoegd…</p>
+  </div>
+</main>
+<script src="js/db.js"></script>
+<script>
+(async () => {
+  const statusEl = document.getElementById('shareStatus');
+  try {
+    const cache = await caches.open('share-inbox');
+    const res = await cache.match('/share-payload');
+    if (!res) {
+      statusEl.textContent = 'Geen gedeeld bestand gevonden. Je kunt ook handmatig importeren via Overzicht.';
+      return;
+    }
+    const text = await res.text();
+    await cache.delete('/share-payload');
+    const incoming = JSON.parse(text);
+    if (!Array.isArray(incoming)) throw new Error('bad format');
+    const result = await VakantieDB.mergeMany(incoming);
+    statusEl.textContent = `✓ ${result.added} nieuw toegevoegd, ${result.skipped} bestonden al. Je gaat zo terug naar je tijdlijn…`;
+    setTimeout(() => { window.location.href = './index.html'; }, 1600);
+  } catch (err) {
+    statusEl.textContent = 'Kon het gedeelde bestand niet lezen. Probeer handmatig importeren via Overzicht.';
+  }
+})();
+</script>
+</body>
+</html>
