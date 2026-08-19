@@ -3,7 +3,7 @@
 // ============================================================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult,
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
   signInAnonymously, onAuthStateChanged, signOut, updateProfile
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
@@ -61,10 +61,28 @@ function obShowStep(id) {
 document.getElementById('obTraveler').addEventListener('click', async () => {
   obClearError();
   obSetLoading(true);
+  const provider = new GoogleAuthProvider();
   try {
-    const provider = new GoogleAuthProvider();
-    await signInWithRedirect(auth, provider);
+    const result = await signInWithPopup(auth, provider);
+    currentUser = result.user;
+    obSetLoading(false);
+    obShowStep('obStepTraveler');
   } catch (err) {
+    if (err && err.code === 'auth/popup-closed-by-user') {
+      obSetLoading(false);
+      return; // gebruiker sloot de pop-up zelf, geen foutmelding nodig
+    }
+    if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request')) {
+      // val terug op omleiden als pop-ups niet toegestaan zijn in deze browser
+      try {
+        await signInWithRedirect(auth, provider);
+        return;
+      } catch (err2) {
+        obSetLoading(false);
+        obShowError('Inloggen mislukt: ' + err2.message);
+        return;
+      }
+    }
     obSetLoading(false);
     obShowError('Inloggen mislukt: ' + err.message);
   }
