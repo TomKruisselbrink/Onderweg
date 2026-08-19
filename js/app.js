@@ -1,8 +1,229 @@
-// ---------- Modal open/sluiten met vloeiende overgang ----------
+// ============================================================
+// FIREBASE — verbinding, login, realtime data
+// ============================================================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult,
+  signInAnonymously, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import {
+  getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, collection,
+  query, orderBy, onSnapshot, arrayUnion, enableIndexedDbPersistence
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAESp3mAYnvHhtpIIRY9QyJwqUciBmijdM",
+  authDomain: "jut-en-juul-op-vakantie.firebaseapp.com",
+  projectId: "jut-en-juul-op-vakantie",
+  storageBucket: "jut-en-juul-op-vakantie.firebasestorage.app",
+  messagingSenderId: "564201748696",
+  appId: "1:564201748696:web:f49f0e3303ce7c0d4dffad",
+  measurementId: "G-JFD9ZZJ9CN"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+enableIndexedDbPersistence(db).catch(() => { /* meerdere tabbladen open o.i.d. — niet kritiek */ });
+
+let currentUser = null;
+let currentTripCode = null;
+let currentRole = null; // 'traveler' | 'follower'
+let unsubscribeEntries = null;
+
+function authorName() {
+  if (!currentUser) return 'Reisgenoot';
+  return currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'Reisgenoot');
+}
+function generateTripCode() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // zonder verwarrende tekens (0/O, 1/I/L)
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// ---------- Onboarding UI ----------
+const obScreen = document.getElementById('onboardScreen');
+const obError = document.getElementById('obError');
+const obLoading = document.getElementById('obLoading');
+
+function obShowError(msg) {
+  obError.textContent = msg;
+  obError.hidden = false;
+}
+function obClearError() { obError.hidden = true; }
+function obSetLoading(on) { obLoading.hidden = !on; }
+function obShowStep(id) {
+  document.querySelectorAll('.onboard__step').forEach(s => s.hidden = s.id !== id);
+  obClearError();
+}
+
+document.getElementById('obTraveler').addEventListener('click', async () => {
+  obClearError();
+  obSetLoading(true);
+  try {
+    sessionStorage.setItem('pendingRole', 'traveler');
+    const provider = new GoogleAuthProvider();
+    await signInWithRedirect(auth, provider);
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Inloggen mislukt: ' + err.message);
+  }
+});
+document.getElementById('obFollower').addEventListener('click', () => {
+  obShowStep('obStepFollower');
+});
+document.getElementById('obBackFromTraveler').addEventListener('click', () => obShowStep('obStepRole'));
+document.getElementById('obBackFromFollower').addEventListener('click', () => obShowStep('obStepRole'));
+
+document.getElementById('obCreateTrip').addEventListener('click', async () => {
+  obClearError();
+  obSetLoading(true);
+  try {
+    const name = document.getElementById('obTripNameInput').value.trim() || 'Jut en Juul op vakantie';
+    let code, exists = true, attempts = 0;
+    while (exists && attempts < 8) {
+      code = generateTripCode();
+      const snap = await getDoc(doc(db, 'trips', code));
+      exists = snap.exists();
+      attempts++;
+    }
+    await setDoc(doc(db, 'trips', code), {
+      name,
+      ownerUids: [currentUser.uid],
+      createdAt: new Date().toISOString()
+    });
+    localStorage.setItem('tripCode', code);
+    localStorage.setItem('tripRole', 'traveler');
+    enterApp(code, 'traveler');
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Kon geen reis aanmaken: ' + err.message);
+  }
+});
+
+document.getElementById('obJoinTrip').addEventListener('click', async () => {
+  obClearError();
+  const code = document.getElementById('obJoinCodeInput').value.trim().toUpperCase();
+  if (code.length !== 6) { obShowError('Vul een geldige 6-tekens reiscode in.'); return; }
+  obSetLoading(true);
+  try {
+    const ref = doc(db, 'trips', code);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { obSetLoading(false); obShowError('Deze reiscode bestaat niet.'); return; }
+    await updateDoc(ref, { ownerUids: arrayUnion(currentUser.uid) });
+    localStorage.setItem('tripCode', code);
+    localStorage.setItem('tripRole', 'traveler');
+    enterApp(code, 'traveler');
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Kon niet bij deze reis komen: ' + err.message);
+  }
+});
+
+document.getElementById('obFollowGo').addEventListener('click', async () => {
+  obClearError();
+  const code = document.getElementById('obFollowCodeInput').value.trim().toUpperCase();
+  if (code.length !== 6) { obShowError('Vul een geldige 6-tekens reiscode in.'); return; }
+  obSetLoading(true);
+  try {
+    if (!currentUser) await signInAnonymously(auth);
+    const ref = doc(db, 'trips', code);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { obSetLoading(false); obShowError('Deze reiscode bestaat niet.'); return; }
+    localStorage.setItem('tripCode', code);
+    localStorage.setItem('tripRole', 'follower');
+    enterApp(code, 'follower');
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Kon niet meekijken: ' + err.message);
+  }
+});
+
+async function enterApp(code, role) {
+  obSetLoading(false);
+  currentTripCode = code;
+  currentRole = role;
+  const tripSnap = await getDoc(doc(db, 'trips', code));
+  const tripName = tripSnap.exists() ? tripSnap.data().name : 'Jut en Juul op vakantie';
+
+  document.getElementById('tripTitle').textContent = tripName;
+  document.getElementById('tripSub').textContent = role === 'follower' ? 'je kijkt mee — alleen lezen' : 'jullie reisdagboek';
+  document.getElementById('tripCodeDisplay').textContent = code;
+
+  document.getElementById('fabNieuw').style.display = role === 'follower' ? 'none' : '';
+  updateWhoButton();
+
+  obScreen.hidden = true;
+  document.getElementById('app').hidden = false;
+
+  subscribeToEntries(code);
+}
+
+function leaveTrip() {
+  if (unsubscribeEntries) unsubscribeEntries();
+  localStorage.removeItem('tripCode');
+  localStorage.removeItem('tripRole');
+  signOut(auth).catch(() => {});
+  location.reload();
+}
+document.getElementById('btnLeaveTrip').addEventListener('click', () => {
+  if (confirm('Deze reis verlaten? Je kunt altijd opnieuw inloggen of de code opnieuw invoeren.')) leaveTrip();
+});
+
+// ---------- Auth state ----------
+getRedirectResult(auth).catch((err) => {
+  obShowError('Inloggen mislukt: ' + err.message);
+});
+
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  if (!user) return;
+
+  const savedCode = localStorage.getItem('tripCode');
+  const savedRole = localStorage.getItem('tripRole');
+  if (savedCode && savedRole) {
+    enterApp(savedCode, savedRole);
+    return;
+  }
+
+  const pendingRole = sessionStorage.getItem('pendingRole');
+  if (pendingRole === 'traveler' && !user.isAnonymous) {
+    sessionStorage.removeItem('pendingRole');
+    obShowStep('obStepTraveler');
+  }
+});
+
+// ---------- Firestore: entries realtime ----------
+let allEntries = [];
+
+function subscribeToEntries(code) {
+  if (unsubscribeEntries) unsubscribeEntries();
+  const q = query(collection(db, 'trips', code, 'entries'), orderBy('timestamp'));
+  unsubscribeEntries = onSnapshot(q, (snapshot) => {
+    allEntries = snapshot.docs.map(d => d.data());
+    renderTimeline();
+    renderMap();
+    updateCounts();
+    renderDashboard();
+  }, (err) => {
+    toast('Synchronisatie-fout: ' + err.message);
+  });
+}
+
+async function saveEntry(entry) {
+  await setDoc(doc(db, 'trips', currentTripCode, 'entries', entry.id), entry);
+}
+async function removeEntry(id) {
+  await deleteDoc(doc(db, 'trips', currentTripCode, 'entries', id));
+}
+
+// ============================================================
+// MODAL open/sluiten met vloeiende overgang
+// ============================================================
 function openModal() {
   const modal = document.getElementById('entryModal');
   modal.hidden = false;
-  // volgende frame: trigger de overgang (anders animeert 'display' niet mee)
   requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
 }
 function closeModal() {
@@ -11,7 +232,9 @@ function closeModal() {
   setTimeout(() => { modal.hidden = true; }, 260);
 }
 
-// ---------- Nieuw moment / Wijzigen (zelfde formulier) ----------
+// ============================================================
+// NIEUW MOMENT / WIJZIGEN
+// ============================================================
 let editingId = null;
 let editingAuthor = null;
 let editingCreatedAt = null;
@@ -80,7 +303,6 @@ function editEntry(entry) {
     : '';
   document.getElementById('addressResults').innerHTML = '';
 
-  // categorie-specifieke velden
   document.querySelectorAll('.pill-chip').forEach(c => c.classList.remove('is-active'));
   pendingMealType = entry.mealType || null;
   pendingQuickTag = entry.quickTag || null;
@@ -110,26 +332,8 @@ function editEntry(entry) {
   showView('view-nieuw');
 }
 
-// ---------- Auteur (wie ben jij) ----------
+// ---------- Reis-knop (rechtsboven) ----------
 const AUTHOR_COLORS = ['#2B6E63', '#B23A2E', '#D6A419', '#5B6EA8'];
-let memoryAuthor = null; // fallback als localStorage niet beschikbaar is (bijv. Safari privénavigatie)
-
-function getAuthor() {
-  try {
-    return localStorage.getItem('auteurNaam') || memoryAuthor;
-  } catch (e) {
-    return memoryAuthor;
-  }
-}
-function setAuthor(name) {
-  memoryAuthor = name;
-  try {
-    localStorage.setItem('auteurNaam', name);
-  } catch (e) {
-    console.warn('Kon naam niet blijvend opslaan (privénavigatie?), werkt wel voor deze sessie.', e);
-    toast('Naam onthouden voor nu — zet privénavigatie uit om ’m te bewaren');
-  }
-}
 function authorColor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -137,52 +341,22 @@ function authorColor(name) {
 }
 function updateWhoButton() {
   const btn = document.getElementById('btnWho');
-  const author = getAuthor();
-  if (author) {
-    btn.textContent = author.slice(0, 1).toUpperCase();
-    btn.style.background = authorColor(author);
-    btn.style.borderColor = 'transparent';
-    btn.style.color = '#fff';
-  } else {
-    btn.textContent = '👤';
+  if (currentRole === 'follower') {
+    btn.textContent = '👀';
     btn.style.background = '';
-    btn.style.borderColor = '';
-    btn.style.color = '';
+    return;
   }
+  const name = authorName();
+  btn.textContent = name.slice(0, 1).toUpperCase();
+  btn.style.background = authorColor(name);
+  btn.style.borderColor = 'transparent';
+  btn.style.color = '#fff';
 }
+document.getElementById('btnWho').addEventListener('click', () => showView('view-overzicht'));
 
-function askAuthor(force) {
-  const existing = getAuthor();
-  if (existing && !force) return;
-  const modal = document.getElementById('entryModal');
-  const card = document.getElementById('entryModalCard');
-  card.innerHTML = `
-    <form class="who-card" id="whoForm">
-      <h3 style="font-family:var(--font-display);margin:0;">Wie ben jij?</h3>
-      <p style="font-size:13px;color:#7c8580;margin:0;">Zo zien jullie straks van wie welk moment komt.</p>
-      <input type="text" id="whoInput" placeholder="Jouw naam" value="${existing || ''}" required autocomplete="off">
-      <button type="submit" class="btn btn--primary btn--wide">Opslaan</button>
-    </form>`;
-  modal.hidden = false;
-  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
-
-  const form = document.getElementById('whoForm');
-  const input = document.getElementById('whoInput');
-  setTimeout(() => input.focus(), 60);
-
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const val = input.value.trim();
-    if (!val) return;
-    setAuthor(val);
-    closeModal();
-    updateWhoButton();
-    renderAll();
-  });
-}
-document.getElementById('btnWho').addEventListener('click', () => askAuthor(true));
-
-// ---------- Navigatie ----------
+// ============================================================
+// NAVIGATIE
+// ============================================================
 const tabButtons = document.querySelectorAll('.tabbar__btn');
 const views = document.querySelectorAll('[data-view]');
 function showView(id) {
@@ -194,7 +368,10 @@ function showView(id) {
 }
 tabButtons.forEach(btn => {
   btn.addEventListener('click', () => {
-    if (btn.dataset.target === 'view-nieuw') resetEntryForm();
+    if (btn.dataset.target === 'view-nieuw') {
+      if (currentRole === 'follower') { showView('view-dashboard'); return; }
+      resetEntryForm();
+    }
     showView(btn.dataset.target);
   });
 });
@@ -207,13 +384,14 @@ function toast(msg) {
   toast._timer = setTimeout(() => { t.hidden = true; }, 2400);
 }
 
-// ---------- Type picker ----------
+// ============================================================
+// TYPE PICKER + categorie-specifieke velden
+// ============================================================
 let selectedType = 'plek';
 
 const TYPE_ICON = { plek: '📍', eten: '🍴', slaap: '🛏️', vervoer: '🚗' };
 const TYPE_LABEL = { plek: 'Plek / Activiteit', eten: 'Eten & Drinken', slaap: 'Slaapplek', vervoer: 'Verplaatsing' };
 const TYPE_COLOR = { plek: '#2B6E63', eten: '#D6A419', slaap: '#B23A2E', vervoer: '#5B6EA8' };
-// oudere data (voor het uitbreiden van de app) blijft leesbaar door 'm op een nieuwe categorie te mappen
 const LEGACY_TYPE_MAP = { activiteit: 'plek', overnachting: 'slaap' };
 function normType(type) { return LEGACY_TYPE_MAP[type] || type; }
 
@@ -257,7 +435,6 @@ document.querySelectorAll('.type-chip').forEach(chip => {
 });
 document.querySelector('.type-chip[data-type="plek"]').classList.add('is-active');
 
-// ---------- Chips (maaltijd/tag/plek-soort/overnachting/vervoer) ----------
 let pendingMealType = null, pendingQuickTag = null, pendingPlaceType = null,
     pendingStayType = null, pendingTransportMode = null;
 
@@ -275,7 +452,6 @@ document.querySelectorAll('.pill-chip').forEach((chip) => {
   });
 });
 
-// ---------- Ster-beoordeling ----------
 let pendingRating = 0;
 function renderStarPicker() {
   document.querySelectorAll('#ratingPicker .star-btn').forEach((b) => {
@@ -296,7 +472,9 @@ function prefillDateTime() {
   document.getElementById('fTime').value = now.toTimeString().slice(0, 5);
 }
 
-// ---------- Locatie ----------
+// ============================================================
+// LOCATIE (GPS + adres zoeken)
+// ============================================================
 let pendingLocation = null;
 let pendingLocationName = null;
 
@@ -315,8 +493,6 @@ document.getElementById('btnLocate').addEventListener('click', () => {
   );
 });
 
-// Adres zoeken — handig om nu al bekende adressen (bijv. accommodaties) vast te leggen,
-// ook als je er nog niet fysiek bent. Vereist internet.
 document.getElementById('btnSearchAddress').addEventListener('click', async () => {
   const query = document.getElementById('fAddressQuery').value.trim();
   const results = document.getElementById('addressResults');
@@ -329,7 +505,6 @@ document.getElementById('btnSearchAddress').addEventListener('click', async () =
       results.innerHTML = '<p class="location-status">Niets gevonden — probeer een andere zoekterm, eventueel met de plaatsnaam erbij</p>';
       return;
     }
-    // Hotels/accommodaties (tourism-categorie in OpenStreetMap) eerst tonen
     const isStay = (p) => p.class === 'tourism' || ['hotel','guest_house','hostel','apartment','motel','camp_site'].includes(p.type);
     data.sort((a, b) => (isStay(b) ? 1 : 0) - (isStay(a) ? 1 : 0));
     results.innerHTML = '';
@@ -353,7 +528,11 @@ document.getElementById('btnSearchAddress').addEventListener('click', async () =
   }
 });
 
-// ---------- Foto's ----------
+// ============================================================
+// FOTO'S — camera of bibliotheek (native keuzemenu), max 3, sterk gecomprimeerd
+// zodat een moment ruim binnen de opslaglimiet van één document blijft.
+// ============================================================
+const MAX_PHOTOS = 3;
 let pendingPhotos = [];
 document.getElementById('btnAddPhoto').addEventListener('click', () => {
   document.getElementById('fPhotos').click();
@@ -361,6 +540,10 @@ document.getElementById('btnAddPhoto').addEventListener('click', () => {
 document.getElementById('fPhotos').addEventListener('change', async (e) => {
   const files = Array.from(e.target.files);
   for (const file of files) {
+    if (pendingPhotos.length >= MAX_PHOTOS) {
+      toast(`Maximaal ${MAX_PHOTOS} foto's per moment`);
+      break;
+    }
     const dataUrl = await compressImage(file);
     pendingPhotos.push(dataUrl);
   }
@@ -389,25 +572,25 @@ function compressImage(file) {
     const reader = new FileReader();
     reader.onload = (e) => { img.src = e.target.result; };
     img.onload = () => {
-      const maxW = 1280;
+      const maxW = 900;
       const scale = Math.min(1, maxW / img.width);
       const canvas = document.createElement('canvas');
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.72));
+      resolve(canvas.toDataURL('image/jpeg', 0.55));
     };
     reader.readAsDataURL(file);
   });
 }
 
-// ---------- Formulier opslaan ----------
+// ============================================================
+// FORMULIER OPSLAAN
+// ============================================================
 document.getElementById('entryForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  askAuthor(false);
-  const author = getAuthor();
-  if (!author) return;
+  if (currentRole === 'follower') return;
 
   const isEdit = editingId !== null;
   const date = document.getElementById('fDate').value;
@@ -422,7 +605,7 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     lng: pendingLocation ? pendingLocation.lng : null,
     locationName: pendingLocationName,
     photos: pendingPhotos.slice(),
-    author: isEdit ? editingAuthor : author,
+    author: isEdit ? editingAuthor : authorName(),
     createdAt: isEdit ? editingCreatedAt : new Date().toISOString()
   };
 
@@ -449,35 +632,27 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     entry.transportMode = pendingTransportMode;
   }
 
-  await VakantieDB.put(entry);
-  toast(isEdit ? 'Moment bijgewerkt ✓' : 'Moment bewaard ✓');
-
-  resetEntryForm();
-  await renderAll();
-  showView('view-dashboard');
+  try {
+    await saveEntry(entry);
+    toast(isEdit ? 'Moment bijgewerkt ✓' : 'Moment bewaard ✓');
+    resetEntryForm();
+    showView('view-dashboard');
+  } catch (err) {
+    toast('Opslaan mislukt: ' + err.message);
+  }
 });
 
-// ---------- Tijdlijn renderen ----------
+// ============================================================
+// TIJDLIJN / POSTKAARTJES
+// ============================================================
 function fmtDayHeading(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
 }
-function fmtTime(ts) {
-  return ts.slice(11, 16);
-}
+function fmtTime(ts) { return ts.slice(11, 16); }
 function fmtStamp(ts) {
   const d = new Date(ts);
   return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' }).toUpperCase();
-}
-
-let allEntries = [];
-
-async function renderAll() {
-  allEntries = await VakantieDB.getAll();
-  renderTimeline();
-  renderMap();
-  updateCounts();
-  renderDashboard();
 }
 
 function renderTimeline() {
@@ -497,10 +672,7 @@ function renderTimeline() {
     heading.className = 'day-heading';
     heading.textContent = fmtDayHeading(day);
     container.appendChild(heading);
-
-    groups[day].forEach(entry => {
-      container.appendChild(renderPostcard(entry));
-    });
+    groups[day].forEach(entry => container.appendChild(renderPostcard(entry)));
   });
 }
 
@@ -565,6 +737,7 @@ function openEntryModal(entry) {
   const modal = document.getElementById('entryModal');
   const card = document.getElementById('entryModalCard');
   const type = normType(entry.type);
+  const canEdit = currentRole !== 'follower';
   card.innerHTML = `
     <h3 style="font-family:var(--font-display);margin:0 0 4px;">${TYPE_ICON[type]} ${escapeHtml(entry.title)}</h3>
     <p style="font-family:var(--font-mono);font-size:11px;color:#7c8580;margin:0 0 12px;">
@@ -575,21 +748,22 @@ function openEntryModal(entry) {
     ${entry.note ? `<p style="line-height:1.6;">${escapeHtml(entry.note)}</p>` : ''}
     ${(entry.photos || []).map(p => `<img src="${p}">`).join('')}
     ${entry.lat ? `<p style="font-size:12px;color:#7c8580;">📍 ${entry.locationName ? escapeHtml(entry.locationName) : entry.lat.toFixed(5) + ', ' + entry.lng.toFixed(5)}</p>` : ''}
-    <button class="btn btn--primary btn--wide" id="btnEditEntry">✏️ Wijzigen</button>
-    <button class="btn btn--ghost btn--wide" id="btnDeleteEntry">🗑️ Verwijderen</button>
+    ${canEdit ? `<button class="btn btn--primary btn--wide" id="btnEditEntry">✏️ Wijzigen</button>
+    <button class="btn btn--ghost btn--wide" id="btnDeleteEntry">🗑️ Verwijderen</button>` : ''}
     <button class="modal__close" id="btnCloseModal">Sluiten</button>
   `;
   modal.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
   document.getElementById('btnCloseModal').onclick = () => { closeModal(); };
-  document.getElementById('btnEditEntry').onclick = () => { editEntry(entry); };
-  document.getElementById('btnDeleteEntry').onclick = async () => {
-    if (confirm('Dit moment verwijderen?')) {
-      await VakantieDB.remove(entry.id);
-      closeModal();
-      await renderAll();
-    }
-  };
+  if (canEdit) {
+    document.getElementById('btnEditEntry').onclick = () => { editEntry(entry); };
+    document.getElementById('btnDeleteEntry').onclick = async () => {
+      if (confirm('Dit moment verwijderen?')) {
+        await removeEntry(entry.id);
+        closeModal();
+      }
+    };
+  }
 }
 document.getElementById('entryModal').addEventListener('click', (e) => {
   if (e.target.id === 'entryModal') closeModal();
@@ -602,7 +776,9 @@ function updateCounts() {
   document.getElementById('countPillMap').textContent = `${withLoc.length} pin${withLoc.length === 1 ? '' : 's'}`;
 }
 
-// ---------- Dashboard ----------
+// ============================================================
+// DASHBOARD
+// ============================================================
 function renderDashboard() {
   const empty = document.getElementById('dashEmpty');
   const content = document.getElementById('dashContent');
@@ -615,7 +791,6 @@ function renderDashboard() {
   empty.hidden = true;
   content.hidden = false;
 
-  // Statistieken — 📍 plekken · 🍴 maaltijden · 🛏️ nachtjes, zoals gevraagd
   const grid = document.getElementById('dashStats');
   const plekken = allEntries.filter(e => normType(e.type) === 'plek').length;
   const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
@@ -627,7 +802,6 @@ function renderDashboard() {
     <div class="stat-card"><b>${allEntries.length}</b><span>Momenten totaal</span></div>
   `;
 
-  // Volgende halte: eerstvolgende moment met een datum in de toekomst
   const now = new Date();
   const future = allEntries
     .filter(e => new Date(e.timestamp) > now)
@@ -648,12 +822,9 @@ function renderDashboard() {
     wrap.innerHTML = '';
   }
 
-  // Laatste 3 momenten
   const recentWrap = document.getElementById('dashRecent');
   recentWrap.innerHTML = '';
-  allEntries.slice(-3).reverse().forEach(entry => {
-    recentWrap.appendChild(renderPostcard(entry));
-  });
+  allEntries.slice(-3).reverse().forEach(entry => recentWrap.appendChild(renderPostcard(entry)));
 
   renderDashMap();
 }
@@ -698,7 +869,9 @@ function renderDashMap() {
 document.getElementById('btnOpenMap').addEventListener('click', () => showView('view-kaart'));
 document.getElementById('btnOpenTijdlijn').addEventListener('click', () => showView('view-tijdlijn'));
 
-// ---------- Kaart ----------
+// ============================================================
+// KAART
+// ============================================================
 let map = null, mapLayer = null;
 function renderMap() {
   if (!map) {
@@ -729,7 +902,9 @@ function renderMap() {
   map.fitBounds(latlngs, { padding: [30, 30] });
 }
 
-// ---------- Overzicht / stats ----------
+// ============================================================
+// OVERZICHT / STATS / REISCODE DELEN
+// ============================================================
 function renderStats() {
   const grid = document.getElementById('statsGrid');
   const days = new Set(allEntries.map(e => e.timestamp.slice(0, 10))).size;
@@ -748,70 +923,43 @@ function renderStats() {
   `;
 }
 
-// ---------- Export / import ----------
-document.getElementById('btnExport').addEventListener('click', async () => {
-  const author = getAuthor() || 'reis';
-  const stamp = new Date().toISOString().slice(0, 10);
-  const filename = `onderweg-${author.toLowerCase()}-${stamp}.json`;
-  const data = JSON.stringify(allEntries, null, 0);
-
-  // Eén tik: opent direct het native deelmenu (WhatsApp, AirDrop, mail, ...)
+document.getElementById('btnShareCode').addEventListener('click', async () => {
+  const text = `Doe mee met ons reisdagboek "Jut en Juul op vakantie"! Vul reiscode ${currentTripCode} in op de app.`;
   try {
-    const file = new File([data], filename, { type: 'application/json' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        files: [file],
-        title: 'Onderweg — reisdagboek',
-        text: `Momenten van ${author}`
-      });
-      toast('Gedeeld ✓');
+    if (navigator.share) {
+      await navigator.share({ title: 'Jut en Juul op vakantie', text });
       return;
     }
   } catch (err) {
-    if (err && err.name === 'AbortError') return; // gebruiker annuleerde het deelmenu zelf
-    // val terug op downloaden hieronder
+    if (err && err.name === 'AbortError') return;
   }
-
-  const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  toast('Bestand gedownload — deel ’m via WhatsApp/AirDrop');
-});
-
-document.getElementById('fImport').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const status = document.getElementById('importStatus');
   try {
-    const text = await file.text();
-    const incoming = JSON.parse(text);
-    if (!Array.isArray(incoming)) throw new Error('bad format');
-    const result = await VakantieDB.mergeMany(incoming);
-    status.textContent = `✓ ${result.added} nieuw toegevoegd, ${result.skipped} bestonden al`;
-    await renderAll();
-    toast('Samengevoegd ✓');
+    await navigator.clipboard.writeText(text);
+    toast('Tekst gekopieerd ✓');
   } catch (err) {
-    status.textContent = 'Kon bestand niet lezen — is het een export van deze app?';
+    toast(`Reiscode: ${currentTripCode}`);
   }
-  e.target.value = '';
+});
+document.getElementById('btnCopyCode').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(currentTripCode);
+    toast('Code gekopieerd ✓');
+  } catch (err) {
+    toast(`Reiscode: ${currentTripCode}`);
+  }
 });
 
-// ---------- Service worker ----------
+// ============================================================
+// SERVICE WORKER
+// ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   });
 }
 
-// ---------- Start ----------
+// ============================================================
+// START
+// ============================================================
 prefillDateTime();
 updateTypeFields();
-askAuthor(false);
-updateWhoButton();
-renderAll();

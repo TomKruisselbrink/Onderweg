@@ -1,7 +1,7 @@
 {
-  "name": "Onderweg — reisdagboek",
-  "short_name": "Onderweg",
-  "description": "Jullie offline reisdagboek: route, plekken, eten en avonturen.",
+  "name": "Jut en Juul op vakantie",
+  "short_name": "Jut & Juul",
+  "description": "Reisdagboek van Imke en Tom: route, plekken, eten en avonturen.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#16302B",
@@ -10,15 +10,5 @@
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
-  ],
-  "share_target": {
-    "action": "./share-import.html",
-    "method": "POST",
-    "enctype": "multipart/form-data",
-    "params": {
-      "files": [
-        { "name": "file", "accept": ["application/json"] }
-      ]
-    }
-  }
+  ]
 }

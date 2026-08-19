@@ -1,11 +1,9 @@
-const CACHE = 'onderweg-v3';
+const CACHE = 'onderweg-v5';
 const SHELL = [
   './',
   './index.html',
   './css/style.css',
   './js/app.js',
-  './js/db.js',
-  './share-import.html',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -29,31 +27,23 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Web Share Target: als iemand het geëxporteerde bestand rechtstreeks naar deze
-// app deelt (Android), onderscheppen we de POST en zetten 'm klaar voor share-import.html.
-self.addEventListener('fetch', (event) => {
-  const reqUrl = new URL(event.request.url);
-  if (event.request.method === 'POST' && reqUrl.pathname.endsWith('/share-import.html')) {
-    event.respondWith((async () => {
-      try {
-        const formData = await event.request.formData();
-        const file = formData.get('file');
-        const text = await file.text();
-        const cache = await caches.open('share-inbox');
-        await cache.put('/share-payload', new Response(text));
-      } catch (e) {
-        // share-import.html toont zelf een foutmelding als er niets klaarstaat
-      }
-      return Response.redirect('./share-import.html', 303);
-    })());
-    return;
-  }
-});
-
 // App shell: cache-first. Kaarttegels (tile.openstreetmap.org): stale-while-revalidate
 // zodat eerder bekeken tegels ook offline zichtbaar blijven.
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
+
+  // Firebase/Firestore/Google-verzoeken NOOIT onderscheppen — dit zijn lang-lopende
+  // realtime-verbindingen en logins; de service worker mag daar niet tussen zitten.
+  // Firestore heeft zijn eigen (robuustere) offline-cache ingebouwd.
+  if (
+    url.includes('googleapis.com') ||
+    url.includes('google.com') ||
+    url.includes('gstatic.com/firebasejs') ||
+    url.includes('firebaseapp.com')
+  ) {
+    return;
+  }
+
   const isTile = url.includes('tile.openstreetmap.org');
 
   if (isTile) {

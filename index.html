@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Onderweg — reisdagboek</title>
+<title>Jut en Juul op vakantie</title>
 <meta name="theme-color" content="#16302B">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
@@ -17,15 +17,73 @@
 </head>
 <body>
 
+<!-- ONBOARDING -->
+<div class="onboard" id="onboardScreen">
+  <div class="onboard__inner">
+    <img src="icons/icon-192.png" class="onboard__mark" alt="">
+    <h1 class="onboard__title" id="obTripName">Jut en Juul op vakantie</h1>
+    <p class="onboard__sub">Reisdagboek van Imke en Tom</p>
+
+    <!-- Stap 1: rol kiezen -->
+    <div class="onboard__step" id="obStepRole">
+      <button type="button" class="onboard__choice" id="obTraveler">
+        <span class="onboard__choice-icon">🧳</span>
+        <span class="onboard__choice-text">
+          <b>Ik ga op vakantie</b>
+          <small>Momenten vastleggen, met Google inloggen</small>
+        </span>
+      </button>
+      <button type="button" class="onboard__choice" id="obFollower">
+        <span class="onboard__choice-icon">👀</span>
+        <span class="onboard__choice-text">
+          <b>Vakantiegangers volgen</b>
+          <small>Alleen meekijken met een reiscode, geen account nodig</small>
+        </span>
+      </button>
+    </div>
+
+    <!-- Stap 2a: reiziger — nieuw of bestaand -->
+    <div class="onboard__step" id="obStepTraveler" hidden>
+      <button type="button" class="btn btn--ghost btn--wide onboard__back" id="obBackFromTraveler">← Terug</button>
+      <label class="field">
+        <span>Naam van de reis</span>
+        <input type="text" id="obTripNameInput" placeholder="Bijv. Rondreis Kroatië 2026" value="Jut en Juul op vakantie">
+      </label>
+      <button type="button" class="btn btn--primary btn--wide" id="obCreateTrip">Nieuwe reis starten</button>
+      <p class="onboard__or">— of —</p>
+      <label class="field">
+        <span>Reiscode van je reisgenoot</span>
+        <input type="text" id="obJoinCodeInput" placeholder="Bijv. K7M2PQ" maxlength="6" style="text-transform:uppercase;">
+      </label>
+      <button type="button" class="btn btn--ghost btn--wide" id="obJoinTrip">Bij bestaande reis voegen</button>
+    </div>
+
+    <!-- Stap 2b: volger — code invoeren -->
+    <div class="onboard__step" id="obStepFollower" hidden>
+      <button type="button" class="btn btn--ghost btn--wide onboard__back" id="obBackFromFollower">← Terug</button>
+      <label class="field">
+        <span>Reiscode</span>
+        <input type="text" id="obFollowCodeInput" placeholder="Bijv. K7M2PQ" maxlength="6" style="text-transform:uppercase;">
+      </label>
+      <button type="button" class="btn btn--primary btn--wide" id="obFollowGo">Meekijken</button>
+    </div>
+
+    <p class="onboard__error" id="obError" hidden></p>
+    <p class="onboard__loading" id="obLoading" hidden>Bezig…</p>
+  </div>
+</div>
+
+<div id="app" hidden>
+
 <header class="topbar">
   <div class="topbar__brand">
-    <span class="topbar__mark">✺</span>
+    <img src="icons/icon-192.png" class="topbar__mark" alt="">
     <div>
-      <h1 id="tripTitle">Onderweg</h1>
-      <p class="topbar__sub" id="tripSub">jullie reisdagboek</p>
+      <h1 id="tripTitle">Jut en Juul op vakantie</h1>
+      <p class="topbar__sub" id="tripSub">Reisdagboek van Imke en Tom</p>
     </div>
   </div>
-  <button class="iconbtn" id="btnWho" title="Wie ben jij?"></button>
+  <button class="iconbtn" id="btnWho" title="Reis-instellingen"></button>
 </header>
 
 <main id="views">
@@ -233,8 +291,9 @@
 
       <div class="field">
         <span>Foto's</span>
-        <input type="file" id="fPhotos" accept="image/*" capture="environment" multiple hidden>
+        <input type="file" id="fPhotos" accept="image/*" multiple hidden>
         <button type="button" class="btn btn--ghost" id="btnAddPhoto">🖼️ Foto's toevoegen</button>
+        <p class="location-status" style="margin:2px 0 0;">Max. 3 foto's per moment (om alles snel te laten synchroniseren).</p>
         <div id="photoPreview" class="photo-preview"></div>
       </div>
 
@@ -250,14 +309,17 @@
     <div class="stats-grid" id="statsGrid"></div>
 
     <div class="panel">
-      <h3>Samenvoegen met je reisgenoot</h3>
-      <p class="panel__hint">Ieder houdt op eigen telefoon bij. Tik op "Delen" om je momenten via WhatsApp/AirDrop/mail naar je reisgenoot te sturen. Op Android: tik het ontvangen bestand op "Delen" → kies "Onderweg" en het voegt zichzelf samen. Op iPhone: sla het bestand op en importeer het hieronder.</p>
-      <button class="btn btn--primary btn--wide" id="btnExport">📤 Deel mijn momenten</button>
-      <label class="btn btn--ghost btn--wide" id="btnImportLabel">
-        ⬆️ Importeer bestand
-        <input type="file" id="fImport" accept="application/json" hidden>
-      </label>
-      <p class="import-status" id="importStatus"></p>
+      <h3>Reisgenoten uitnodigen</h3>
+      <p class="panel__hint">Deel deze code met je reisgenoot zodat die kan meebewerken, of met familie om read-only mee te laten kijken.</p>
+      <div class="trip-code-display" id="tripCodeDisplay">——————</div>
+      <button class="btn btn--primary btn--wide" id="btnShareCode">📤 Deel reiscode</button>
+      <button class="btn btn--ghost btn--wide" id="btnCopyCode">📋 Kopieer code</button>
+    </div>
+
+    <div class="panel">
+      <h3>Reis wisselen</h3>
+      <p class="panel__hint">Aan een andere reis meewerken, of stoppen met meekijken? Verlaat deze reis en kies opnieuw.</p>
+      <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
   </section>
 
@@ -266,10 +328,12 @@
 <nav class="tabbar">
   <button class="tabbar__btn is-active" data-target="view-dashboard"><span>🏠</span>Dashboard</button>
   <button class="tabbar__btn" data-target="view-tijdlijn"><span>🗒️</span>Tijdlijn</button>
-  <button class="tabbar__btn tabbar__btn--fab" data-target="view-nieuw"><span>＋</span><b class="fab-label">Nieuw moment</b></button>
+  <button class="tabbar__btn tabbar__btn--fab" data-target="view-nieuw" id="fabNieuw"><span>＋</span><b class="fab-label">Nieuw moment</b></button>
   <button class="tabbar__btn" data-target="view-kaart"><span>🗺️</span>Kaart</button>
   <button class="tabbar__btn" data-target="view-overzicht"><span>📦</span>Overzicht</button>
 </nav>
+
+</div>
 
 <div class="modal" id="entryModal" hidden>
   <div class="modal__card" id="entryModalCard"></div>
@@ -278,7 +342,25 @@
 <div class="toast" id="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="js/db.js"></script>
-<script src="js/app.js"></script>
+<script>
+// Vangt fouten op tijdens het laden/uitvoeren van de app-module en toont ze zichtbaar,
+// zodat een probleem nooit meer "stil" blijft — ook zonder ontwikkelaarsconsole.
+window.addEventListener('error', function (e) {
+  var el = document.getElementById('obError');
+  if (el) {
+    el.hidden = false;
+    el.textContent = 'Er ging iets mis bij het laden: ' + (e.message || (e.target && e.target.src) || 'onbekende fout') + '. Probeer de pagina te verversen (of app opnieuw te openen).';
+  }
+}, true);
+window.addEventListener('unhandledrejection', function (e) {
+  var el = document.getElementById('obError');
+  if (el) {
+    el.hidden = false;
+    el.textContent = 'Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '. Probeer de pagina te verversen.';
+  }
+});
+</script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>
+
