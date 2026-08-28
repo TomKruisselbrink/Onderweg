@@ -27,6 +27,14 @@ service cloud.firestore {
         allow write: if request.auth != null
           && request.auth.token.firebase.sign_in_provider == 'google.com';
       }
+
+      match /comments/{commentId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow delete: if request.auth != null
+          && (resource.data.authorUid == request.auth.uid
+              || request.auth.token.firebase.sign_in_provider == 'google.com');
+      }
     }
   }
 }
@@ -37,9 +45,11 @@ schrijven (de database start standaard volledig afgesloten).
 
 **Wat dit betekent:** iedereen die met een Google-account inlogt én de juiste
 reiscode heeft, kan momenten toevoegen/wijzigen. Wie zonder account (anoniem)
-meekijkt, kan alleen lezen. Dit is een simpel, laagdrempelig model — prima
-voor een privé-reisdagboek met een code die je alleen met vertrouwde mensen
-deelt, maar geen bank-niveau beveiliging.
+meekijkt, kan alleen lezen — behalve reacties: die mag iedereen met de code
+plaatsen (ook volgers), en verwijderen mag je alleen je eigen reactie, of als
+Tom/Imke (die kunnen alles opruimen). Dit is een simpel, laagdrempelig model —
+prima voor een privé-reisdagboek met een code die je alleen met vertrouwde
+mensen deelt, maar geen bank-niveau beveiliging.
 
 **2. Je gedeployde domein toestaan**
 
@@ -65,6 +75,11 @@ account nodig, alleen lezen).
 **Reiscode delen:** te vinden onder Overzicht → "Reisgenoten uitnodigen".
 Deel 'm met Imke zodat ze ook kan bewerken, of met familie om read-only mee
 te laten kijken.
+
+**Reageren op dagen:** iedereen die de reiscode heeft — ook familie die
+alleen meekijkt — kan onderaan elke dag in de Tijdlijn een reactie
+achterlaten. Handig voor "wat leuk zeg!" of vragen vanuit huis. Volgers
+vullen bij het meekijken hun naam in, zodat duidelijk is wie wat zegt.
 
 **Realtime:** zodra jij of Imke iets toevoegt, verschijnt het (bij internet)
 meteen op elkaars scherm en bij iedereen die meekijkt.
