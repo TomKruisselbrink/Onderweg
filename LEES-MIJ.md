@@ -132,6 +132,26 @@ Overzicht. Tik op een foto voor een volledig-scherm weergave met swipen.
 wie onderweg is, de laatste locatie, het dagnummer en hoe lang geleden het
 laatste moment is toegevoegd, plus snelkoppelingen naar Route/Album/Tijdlijn.
 
+**Reis afspelen (tijdmachine):** op de Kaart-pagina staat nu een knop "🕰️ Reis
+afspelen". Daarmee open je een schuifbalk waarmee je door de dagen van de
+reis kunt bewegen — de kaart toont dan alleen de route en pinnen tot dat
+punt, met de meest recente plek duidelijk gemarkeerd (een pulserende rand).
+Met ▶ speelt de route zichzelf automatisch af, moment voor moment, met een
+kort tekstballonnetje bij elk bereikt punt. De gewone kaart (met de hele
+route in één keer) blijft gewoon het standaardgedrag — dit is een extra optie
+die je zelf aanzet.
+
+**Reisdagboek:** via "📖 Reisdagboek" onderaan het Dashboard genereert de app
+automatisch een leesbaar reisverslag uit alle bestaande momenten — per dag
+een hoofdstuk (met "Van → Naar" als titel bij een verplaatsing), gevolgd door
+de momenten van die dag met foto's, beoordelingen en hoogtepunten, en een
+kort dagoverzicht (kilometers, aantal plekken, foto's, hoogtepunten)
+onderaan. Er wordt geen tekst verzonnen — alleen wat al is vastgelegd, netjes
+opgemaakt. Met "🖨️ Bewaar als PDF" open je het printvenster van je
+telefoon/browser, waarmee je het reisdagboek als PDF kunt opslaan of
+printen (dit gebruikt de ingebouwde print-functie van je toestel, geen
+aparte dienst).
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is
