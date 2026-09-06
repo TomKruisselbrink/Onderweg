@@ -35,6 +35,11 @@ service cloud.firestore {
           && (resource.data.authorUid == request.auth.uid
               || request.auth.token.firebase.sign_in_provider == 'google.com');
       }
+
+      match /followers/{followerId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && request.auth.uid == followerId;
+      }
     }
   }
 }
@@ -78,8 +83,20 @@ te laten kijken.
 
 **Reageren op dagen:** iedereen die de reiscode heeft — ook familie die
 alleen meekijkt — kan onderaan elke dag in de Tijdlijn een reactie
-achterlaten. Handig voor "wat leuk zeg!" of vragen vanuit huis. Volgers
-vullen bij het meekijken hun naam in, zodat duidelijk is wie wat zegt.
+achterlaten, en ook op elkaars reactie reageren (via "Reageer" onder een
+reactie). Handig voor "wat leuk zeg!" of vragen vanuit huis. Volgers vullen
+bij het meekijken hun naam in, zodat duidelijk is wie wat zegt.
+
+**Wie volgt jullie:** onder Overzicht zien Tom en Imke een lijstje met de
+namen van iedereen die is gaan meekijken met de reiscode.
+
+**Statistieken aanklikken:** een tegel als "📍 Plekken bezocht" of "Foto's"
+aantikken op Dashboard of Overzicht opent een lijst (of foto-overzicht) van
+alles wat in die categorie valt.
+
+**Eigen categorie toevoegen:** bij Plek/Activiteit kun je via "➕ Eigen" zelf
+een soort plek intypen (bijv. "Strand" of "Wijngaard") — die wordt onthouden
+voor de volgende keer.
 
 **Realtime:** zodra jij of Imke iets toevoegt, verschijnt het (bij internet)
 meteen op elkaars scherm en bij iedereen die meekijkt.

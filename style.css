@@ -203,11 +203,24 @@ main{
 .day-comments__list{ display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
 .day-comments__empty{ font-size:12.5px; color:#9aa39e; margin:0; font-style:italic; }
 .comment{ display:flex; gap:9px; align-items:flex-start; }
+.comment--reply{ margin-left:26px; opacity:0.92; }
 .comment b{ font-size:12.5px; font-family:var(--font-display); }
 .comment p{ font-size:13px; margin:1px 0 0; line-height:1.4; color:#3c443f; }
-.comment__remove{
-  background:none; border:none; color:#b6bdb8; font-size:16px; line-height:1;
-  padding:2px 4px; flex-shrink:0;
+.comment__actions{ display:flex; gap:12px; margin-top:3px; }
+.comment__reply-btn, .comment__remove{
+  background:none; border:none; color:#9aa39e; font-size:11px;
+  font-family:var(--font-mono); text-transform:uppercase; letter-spacing:0.3px;
+  padding:2px 0;
+}
+.comment__reply-btn:hover, .comment__remove:hover{ color:var(--jade-dark); }
+.comment__reply-form{ display:flex; gap:6px; margin-top:6px; }
+.comment__reply-form input{
+  flex:1; border:1.5px solid var(--line); border-radius:16px; padding:6px 12px;
+  font-size:12.5px; background:#fffdf7;
+}
+.comment__reply-form button{
+  background:var(--jade); color:#fff; border:none; border-radius:50%;
+  width:28px; height:28px; flex-shrink:0; font-size:12px;
 }
 .day-comments__form{ display:flex; gap:8px; }
 .day-comments__form input{
@@ -346,6 +359,9 @@ main.is-empty .timeline{display:none;}
 }
 .pill-chip.is-active{
   background:var(--jade); border-color:var(--jade); color:#fff;
+}
+.pill-chip--add{
+  background:transparent; border-style:dashed; color:var(--jade-dark);
 }
 
 .star-picker{ display:flex; gap:4px; }
@@ -536,7 +552,9 @@ main.is-empty .timeline{display:none;}
 }
 .stat-card{
   background:#fffdf7; border:1px solid var(--line); border-radius:12px; padding:14px;
+  cursor:pointer; transition:transform 120ms ease-out;
 }
+.stat-card:active{ transform:scale(0.97); }
 .stat-card b{
   font-family:var(--font-display); font-size:26px; display:block; color:var(--jade-dark);
 }
@@ -548,7 +566,18 @@ main.is-empty .timeline{display:none;}
 }
 .panel h3{font-family:var(--font-display); margin:0 0 2px; font-size:17px;}
 .panel__hint{font-size:12.5px; color:#7c8580; margin:0 0 6px; line-height:1.5;}
+.followers-list{display:flex; flex-direction:column; gap:8px;}
+.follower-row{display:flex; align-items:center; gap:10px; font-size:13.5px;}
 .import-status{font-size:12px; color:var(--jade-dark); font-family:var(--font-mono); min-height:14px; margin:0;}
+
+/* ---------- GEFILTERDE LIJST (vanuit klikbare statistieken) ---------- */
+.photo-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+.photo-grid__img{ width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; }
+.filtered-days{ display:flex; flex-direction:column; gap:8px; }
+.filtered-day{
+  background:var(--paper-2); border-radius:8px; padding:10px 12px;
+  font-size:13.5px; text-transform:capitalize;
+}
 
 /* ---------- TABBAR ---------- */
 .tabbar{

@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Jut en Juul op vakantie</title>
 <meta name="theme-color" content="#16302B">
 <link rel="manifest" href="manifest.json">
@@ -201,6 +201,7 @@
             <button type="button" class="pill-chip" data-value="cultuur">🏛️ Cultuur</button>
             <button type="button" class="pill-chip" data-value="stad">🏘️ Stad/Dorp</button>
             <button type="button" class="pill-chip" data-value="parel">💎 Verborgen parel</button>
+            <button type="button" class="pill-chip pill-chip--add" id="btnAddPlaceType">➕ Eigen</button>
           </div>
         </div>
         <label class="checkbox-field">
@@ -318,6 +319,12 @@
       <div class="trip-code-display" id="tripCodeDisplay">——————</div>
       <button class="btn btn--primary btn--wide" id="btnShareCode">📤 Deel reiscode</button>
       <button class="btn btn--ghost btn--wide" id="btnCopyCode">📋 Kopieer code</button>
+    </div>
+
+    <div class="panel" id="followersPanel">
+      <h3>Wie volgt jullie</h3>
+      <p class="panel__hint">Familie en vrienden die met de reiscode zijn gaan meekijken.</p>
+      <div id="followersList" class="followers-list"></div>
     </div>
 
     <div class="panel">
