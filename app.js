@@ -174,7 +174,11 @@ function registerAsFollower(code) {
     name: authorName(),
     joinedAt: new Date().toISOString()
   });
-  write().catch(() => { setTimeout(() => write().catch(() => {}), 4000); });
+  write().catch((err) => {
+    setTimeout(() => write().catch((err2) => {
+      toast('Kon je niet aanmelden als volger: ' + err2.message);
+    }), 4000);
+  });
 
   clearInterval(followerHeartbeat);
   followerHeartbeat = setInterval(() => write().catch(() => {}), 5 * 60 * 1000);
@@ -300,7 +304,10 @@ function subscribeToFollowers(code) {
   unsubscribeFollowers = onSnapshot(q, (snapshot) => {
     allFollowers = snapshot.docs.map(d => d.data());
     renderFollowers();
-  }, () => { /* volgerslijst is decoratief, geen harde foutmelding nodig */ });
+  }, (err) => {
+    const wrap = document.getElementById('followersList');
+    if (wrap) wrap.innerHTML = `<p class="panel__hint" style="color:var(--brick);margin:0;">Kon volgers niet laden: ${escapeHtml(err.message)}</p>`;
+  });
 }
 
 function renderFollowers() {
@@ -483,10 +490,7 @@ function showView(id) {
   tabButtons.forEach(b => b.classList.toggle('is-active', b.dataset.target === id));
   if (id === 'view-kaart') {
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      ensureMap();
-      renderMap();
-      map.invalidateSize();
-      if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
+      rebuildMap();
     }));
   }
   if (id === 'view-dashboard') {
@@ -1372,22 +1376,29 @@ document.getElementById('btnOpenTijdlijn').addEventListener('click', () => showV
 // ============================================================
 let map = null, mapLayer = null, mapLatLngs = [];
 
-// De kaart wordt bewust pas aangemaakt zodra het tabblad voor het eerst echt
-// zichtbaar is (vanuit showView). Leaflet berekent zijn eigen afmetingen fout
-// als het wordt aangemaakt terwijl de container nog verborgen is (0×0 px) —
-// dat gaf het "verkeerd ingezoomde" effect.
-function ensureMap() {
-  if (map) return;
+// De kaart wordt VOLLEDIG opnieuw opgebouwd (niet hergebruikt) telkens als het
+// tabblad wordt geopend. Dat is iets duurder, maar sluit definitief uit dat
+// Leaflet met een verkeerde interne maat blijft zitten (het "ingezoomde"
+// effect) — een probleem dat soms zelfs na invalidateSize() bleef hangen.
+function rebuildMap() {
+  if (map) {
+    try { map.remove(); } catch (e) { /* al verwijderd */ }
+    map = null;
+    mapLayer = null;
+  }
   map = L.map('map').setView([52.1, 5.3], 6);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap',
     maxZoom: 19
   }).addTo(map);
   mapLayer = L.layerGroup().addTo(map);
+  drawMapMarkers();
+  map.invalidateSize();
+  if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
 }
 
-function renderMap() {
-  if (!map) return; // nog niet aangemaakt — gebeurt zodra het tabblad geopend wordt
+function drawMapMarkers() {
+  if (!mapLayer) return;
   mapLayer.clearLayers();
   const withLoc = allEntries.filter(e => e.lat);
   mapLatLngs = [];
@@ -1405,7 +1416,14 @@ function renderMap() {
     mapLatLngs.push([entry.lat, entry.lng]);
   });
   L.polyline(mapLatLngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(mapLayer);
-  map.fitBounds(mapLatLngs, { padding: [30, 30] });
+}
+
+// Als data binnenkomt terwijl het tabblad al open is, gewoon de pinnen verversen
+// (geen volledige heropbouw nodig — dat gebeurt alleen bij het openen zelf).
+function renderMap() {
+  if (!map) return;
+  drawMapMarkers();
+  if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
 }
 
 // ============================================================
