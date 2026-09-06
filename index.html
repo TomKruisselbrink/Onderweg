@@ -17,6 +17,8 @@
 </head>
 <body>
 
+<div id="globalErrorBanner" hidden></div>
+
 <!-- ONBOARDING -->
 <div class="onboard" id="onboardScreen">
   <div class="onboard__inner">
@@ -203,6 +205,10 @@
             <button type="button" class="pill-chip" data-value="parel">💎 Verborgen parel</button>
             <button type="button" class="pill-chip pill-chip--add" id="btnAddPlaceType">➕ Eigen</button>
           </div>
+          <form class="add-chip-form" id="addPlaceTypeForm" hidden>
+            <input type="text" id="addPlaceTypeInput" placeholder="Bijv. Strand, Wijngaard…" maxlength="24">
+            <button type="submit" class="btn btn--primary">Toevoegen</button>
+          </form>
         </div>
         <label class="checkbox-field">
           <input type="checkbox" id="fHighlight">
@@ -354,21 +360,21 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-// Vangt fouten op tijdens het laden/uitvoeren van de app-module en toont ze zichtbaar,
-// zodat een probleem nooit meer "stil" blijft — ook zonder ontwikkelaarsconsole.
+// Vangt fouten op tijdens het laden/uitvoeren van de app en toont ze altijd
+// zichtbaar (via een balk bovenin, ongeacht welk scherm actief is), zodat een
+// probleem nooit meer "stil" blijft — ook zonder ontwikkelaarsconsole.
+function showGlobalError(msg) {
+  var banner = document.getElementById('globalErrorBanner');
+  if (!banner) return;
+  banner.textContent = '⚠️ ' + msg + ' (tik om te sluiten)';
+  banner.hidden = false;
+  banner.onclick = function () { banner.hidden = true; };
+}
 window.addEventListener('error', function (e) {
-  var el = document.getElementById('obError');
-  if (el) {
-    el.hidden = false;
-    el.textContent = 'Er ging iets mis bij het laden: ' + (e.message || (e.target && e.target.src) || 'onbekende fout') + '. Probeer de pagina te verversen (of app opnieuw te openen).';
-  }
+  showGlobalError('Er ging iets mis: ' + (e.message || (e.target && e.target.src) || 'onbekende fout'));
 }, true);
 window.addEventListener('unhandledrejection', function (e) {
-  var el = document.getElementById('obError');
-  if (el) {
-    el.hidden = false;
-    el.textContent = 'Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason) + '. Probeer de pagina te verversen.';
-  }
+  showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
 <script type="module" src="js/app.js"></script>

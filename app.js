@@ -162,6 +162,24 @@ document.getElementById('obFollowGo').addEventListener('click', async () => {
   }
 });
 
+// Meldt jezelf aan als volger, zodat Tom/Imke kunnen zien wie er meekijkt.
+// Probeert het na een mislukking automatisch nog eens (bijv. vlak nadat de
+// beveiligingsregels zijn bijgewerkt), en herhaalt zichzelf terwijl de app
+// open blijft — zo hoeft niemand zelf te verversen om alsnog zichtbaar te
+// worden.
+let followerHeartbeat = null;
+function registerAsFollower(code) {
+  const write = () => setDoc(doc(db, 'trips', code, 'followers', currentUser.uid), {
+    uid: currentUser.uid,
+    name: authorName(),
+    joinedAt: new Date().toISOString()
+  });
+  write().catch(() => { setTimeout(() => write().catch(() => {}), 4000); });
+
+  clearInterval(followerHeartbeat);
+  followerHeartbeat = setInterval(() => write().catch(() => {}), 5 * 60 * 1000);
+}
+
 async function enterApp(code, role) {
   obSetLoading(false);
   currentTripCode = code;
@@ -182,12 +200,7 @@ async function enterApp(code, role) {
   showSkeletons();
 
   if (role === 'follower') {
-    // Meld jezelf aan als volger, zodat Tom/Imke kunnen zien wie er meekijkt.
-    setDoc(doc(db, 'trips', code, 'followers', currentUser.uid), {
-      uid: currentUser.uid,
-      name: authorName(),
-      joinedAt: new Date().toISOString()
-    }).catch(() => {});
+    registerAsFollower(code);
   } else {
     subscribeToFollowers(code);
   }
@@ -213,6 +226,7 @@ function leaveTrip() {
   if (unsubscribeEntries) unsubscribeEntries();
   if (unsubscribeComments) unsubscribeComments();
   if (unsubscribeFollowers) unsubscribeFollowers();
+  clearInterval(followerHeartbeat);
   localStorage.removeItem('tripCode');
   localStorage.removeItem('tripRole');
   signOut(auth).catch(() => {});
@@ -370,6 +384,7 @@ function resetEntryForm() {
   pendingStayType = null; pendingTransportMode = null;
   pendingRating = 0;
   renderStarPicker();
+  document.getElementById('addPlaceTypeForm').hidden = true;
   document.getElementById('fHighlight').checked = false;
   document.getElementById('chkGoedBed').checked = false;
   document.getElementById('chkUitzicht').checked = false;
@@ -467,8 +482,9 @@ function showView(id) {
   views.forEach(v => v.hidden = v.id !== id);
   tabButtons.forEach(b => b.classList.toggle('is-active', b.dataset.target === id));
   if (id === 'view-kaart') {
+    ensureMap();
+    renderMap();
     setTimeout(() => {
-      if (!map) return;
       map.invalidateSize();
       if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
     }, 60);
@@ -684,15 +700,23 @@ function renderCustomPlaceTypeChips() {
 }
 renderCustomPlaceTypeChips();
 document.getElementById('btnAddPlaceType').addEventListener('click', () => {
-  const label = prompt('Nieuw soort plek, bijv. "Strand" of "Wijngaard":');
-  if (!label || !label.trim()) return;
-  const clean = label.trim().slice(0, 24);
+  const form = document.getElementById('addPlaceTypeForm');
+  form.hidden = !form.hidden;
+  if (!form.hidden) document.getElementById('addPlaceTypeInput').focus();
+});
+document.getElementById('addPlaceTypeForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('addPlaceTypeInput');
+  const clean = input.value.trim().slice(0, 24);
+  if (!clean) return;
   const list = loadCustomPlaceTypes();
   if (!list.includes(clean)) {
     list.push(clean);
     localStorage.setItem('customPlaceTypes', JSON.stringify(list));
   }
   renderCustomPlaceTypeChips();
+  input.value = '';
+  document.getElementById('addPlaceTypeForm').hidden = true;
   const newChip = document.querySelector(`#placeTypeRow .pill-chip[data-value="${CSS.escape(clean)}"]`);
   if (newChip) newChip.click();
 });
@@ -959,17 +983,18 @@ function renderTimeline() {
   staggerIn(container.querySelectorAll('.postcard'));
 }
 
-function renderCommentRow(c, day, isReply) {
+function renderCommentRow(c, day, isReply, replyingToName) {
   const row = document.createElement('div');
   row.className = isReply ? 'comment comment--reply' : 'comment';
   const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
   row.innerHTML = `
     <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
     <div style="flex:1;">
+      ${replyingToName ? `<span class="comment__replying-to">→ antwoord aan ${escapeHtml(replyingToName)}</span>` : ''}
       <b>${escapeHtml(c.author)}</b>
       <p>${escapeHtml(c.text)}</p>
       <div class="comment__actions">
-        ${!isReply ? `<button type="button" class="comment__reply-btn">Reageer</button>` : ''}
+        <button type="button" class="comment__reply-btn">Reageer</button>
         ${canRemove ? `<button type="button" class="comment__remove">Verwijderen</button>` : ''}
       </div>
       <form class="comment__reply-form" hidden>
@@ -978,29 +1003,27 @@ function renderCommentRow(c, day, isReply) {
       </form>
     </div>
   `;
-  if (!isReply) {
-    const replyBtn = row.querySelector('.comment__reply-btn');
-    const replyForm = row.querySelector('.comment__reply-form');
-    replyBtn.addEventListener('click', () => {
-      replyForm.hidden = !replyForm.hidden;
-      if (!replyForm.hidden) replyForm.querySelector('input').focus();
-    });
-    replyForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const input = replyForm.querySelector('input');
-      const text = input.value.trim();
-      if (!text) return;
-      input.disabled = true;
-      try {
-        await addComment(day, text, c.id);
-        input.value = '';
-        replyForm.hidden = true;
-      } catch (err) {
-        toast('Reageren mislukt: ' + err.message);
-      }
-      input.disabled = false;
-    });
-  }
+  const replyBtn = row.querySelector('.comment__reply-btn');
+  const replyForm = row.querySelector('.comment__reply-form');
+  replyBtn.addEventListener('click', () => {
+    replyForm.hidden = !replyForm.hidden;
+    if (!replyForm.hidden) replyForm.querySelector('input').focus();
+  });
+  replyForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = replyForm.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await addComment(day, text, c.id);
+      input.value = '';
+      replyForm.hidden = true;
+    } catch (err) {
+      toast('Reageren mislukt: ' + err.message);
+    }
+    input.disabled = false;
+  });
   if (canRemove) {
     row.querySelector('.comment__remove').addEventListener('click', () => removeComment(c.id));
   }
@@ -1012,7 +1035,22 @@ function renderDayComments(day) {
   wrap.className = 'day-comments';
   const dayComments = allComments.filter(c => c.day === day);
   const topLevel = dayComments.filter(c => !c.replyTo);
-  const repliesOf = (id) => dayComments.filter(c => c.replyTo === id);
+
+  // Verzamelt alle antwoorden op een reactie, ook antwoorden-op-antwoorden,
+  // maar toont ze allemaal netjes op één inspring-niveau onder de hoofdreactie
+  // (chronologisch), zodat een gesprek nooit "doodloopt".
+  function getAllDescendants(rootId) {
+    const result = [];
+    const queue = [rootId];
+    while (queue.length) {
+      const parentId = queue.shift();
+      dayComments.filter(c => c.replyTo === parentId).forEach((child) => {
+        result.push(child);
+        queue.push(child.id);
+      });
+    }
+    return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
 
   const list = document.createElement('div');
   list.className = 'day-comments__list';
@@ -1021,7 +1059,12 @@ function renderDayComments(day) {
   } else {
     topLevel.forEach((c) => {
       list.appendChild(renderCommentRow(c, day, false));
-      repliesOf(c.id).forEach((reply) => list.appendChild(renderCommentRow(reply, day, true)));
+      const byId = {}; dayComments.forEach(cm => { byId[cm.id] = cm; });
+      getAllDescendants(c.id).forEach((reply) => {
+        const parent = byId[reply.replyTo];
+        const replyingToName = parent && parent.id !== c.id ? parent.author : null;
+        list.appendChild(renderCommentRow(reply, day, true, replyingToName));
+      });
     });
   }
   wrap.appendChild(list);
@@ -1176,7 +1219,11 @@ function openFilteredList(kind) {
   document.getElementById(id).addEventListener('click', (e) => {
     const card = e.target.closest('.stat-card');
     if (!card || !card.dataset.filter) return;
-    openFilteredList(card.dataset.filter);
+    try {
+      openFilteredList(card.dataset.filter);
+    } catch (err) {
+      toast('Kon lijst niet openen: ' + err.message);
+    }
   });
 });
 
@@ -1324,15 +1371,23 @@ document.getElementById('btnOpenTijdlijn').addEventListener('click', () => showV
 // KAART
 // ============================================================
 let map = null, mapLayer = null, mapLatLngs = [];
+
+// De kaart wordt bewust pas aangemaakt zodra het tabblad voor het eerst echt
+// zichtbaar is (vanuit showView). Leaflet berekent zijn eigen afmetingen fout
+// als het wordt aangemaakt terwijl de container nog verborgen is (0×0 px) —
+// dat gaf het "verkeerd ingezoomde" effect.
+function ensureMap() {
+  if (map) return;
+  map = L.map('map').setView([52.1, 5.3], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 19
+  }).addTo(map);
+  mapLayer = L.layerGroup().addTo(map);
+}
+
 function renderMap() {
-  if (!map) {
-    map = L.map('map').setView([52.1, 5.3], 6);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap',
-      maxZoom: 19
-    }).addTo(map);
-    mapLayer = L.layerGroup().addTo(map);
-  }
+  if (!map) return; // nog niet aangemaakt — gebeurt zodra het tabblad geopend wordt
   mapLayer.clearLayers();
   const withLoc = allEntries.filter(e => e.lat);
   mapLatLngs = [];

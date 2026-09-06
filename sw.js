@@ -1,4 +1,4 @@
-const CACHE = 'onderweg-v13';
+const CACHE = 'onderweg-v15';
 const SHELL = [
   './',
   './index.html',
