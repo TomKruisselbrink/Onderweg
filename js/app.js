@@ -162,6 +162,28 @@ document.getElementById('obFollowGo').addEventListener('click', async () => {
   }
 });
 
+// Meldt jezelf aan als volger, zodat Tom/Imke kunnen zien wie er meekijkt.
+// Probeert het na een mislukking automatisch nog eens (bijv. vlak nadat de
+// beveiligingsregels zijn bijgewerkt), en herhaalt zichzelf terwijl de app
+// open blijft — zo hoeft niemand zelf te verversen om alsnog zichtbaar te
+// worden.
+let followerHeartbeat = null;
+function registerAsFollower(code) {
+  const write = () => setDoc(doc(db, 'trips', code, 'followers', currentUser.uid), {
+    uid: currentUser.uid,
+    name: authorName(),
+    joinedAt: new Date().toISOString()
+  });
+  write().catch((err) => {
+    setTimeout(() => write().catch((err2) => {
+      toast('Kon je niet aanmelden als volger: ' + err2.message);
+    }), 4000);
+  });
+
+  clearInterval(followerHeartbeat);
+  followerHeartbeat = setInterval(() => write().catch(() => {}), 5 * 60 * 1000);
+}
+
 async function enterApp(code, role) {
   obSetLoading(false);
   currentTripCode = code;
@@ -174,11 +196,18 @@ async function enterApp(code, role) {
   document.getElementById('tripCodeDisplay').textContent = code;
 
   document.getElementById('fabNieuw').style.display = role === 'follower' ? 'none' : '';
+  document.getElementById('followersPanel').hidden = role === 'follower';
   updateWhoButton();
 
   obScreen.hidden = true;
   document.getElementById('app').hidden = false;
   showSkeletons();
+
+  if (role === 'follower') {
+    registerAsFollower(code);
+  } else {
+    subscribeToFollowers(code);
+  }
 
   subscribeToEntries(code);
   subscribeToComments(code);
@@ -200,6 +229,8 @@ function showSkeletons() {
 function leaveTrip() {
   if (unsubscribeEntries) unsubscribeEntries();
   if (unsubscribeComments) unsubscribeComments();
+  if (unsubscribeFollowers) unsubscribeFollowers();
+  clearInterval(followerHeartbeat);
   localStorage.removeItem('tripCode');
   localStorage.removeItem('tripRole');
   signOut(auth).catch(() => {});
@@ -265,19 +296,49 @@ function subscribeToComments(code) {
   });
 }
 
+let unsubscribeFollowers = null;
+let allFollowers = [];
+function subscribeToFollowers(code) {
+  if (unsubscribeFollowers) unsubscribeFollowers();
+  const q = query(collection(db, 'trips', code, 'followers'), orderBy('joinedAt'));
+  unsubscribeFollowers = onSnapshot(q, (snapshot) => {
+    allFollowers = snapshot.docs.map(d => d.data());
+    renderFollowers();
+  }, (err) => {
+    const wrap = document.getElementById('followersList');
+    if (wrap) wrap.innerHTML = `<p class="panel__hint" style="color:var(--brick);margin:0;">Kon volgers niet laden: ${escapeHtml(err.message)}</p>`;
+  });
+}
+
+function renderFollowers() {
+  const wrap = document.getElementById('followersList');
+  if (!wrap) return;
+  if (allFollowers.length === 0) {
+    wrap.innerHTML = '<p class="panel__hint" style="margin:0;">Nog niemand meegekeken — deel de reiscode hierboven.</p>';
+    return;
+  }
+  wrap.innerHTML = allFollowers.map(f => `
+    <div class="follower-row">
+      <span class="author-dot" style="background:${authorColor(f.name)}">${escapeHtml(f.name.slice(0, 1).toUpperCase())}</span>
+      <span>${escapeHtml(f.name)}</span>
+    </div>
+  `).join('');
+}
+
 async function saveEntry(entry) {
   await setDoc(doc(db, 'trips', currentTripCode, 'entries', entry.id), entry);
 }
 async function removeEntry(id) {
   await deleteDoc(doc(db, 'trips', currentTripCode, 'entries', id));
 }
-async function addComment(day, text) {
+async function addComment(day, text, replyTo = null) {
   const comment = {
     id: crypto.randomUUID ? crypto.randomUUID() : 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2),
     day,
     text: text.trim(),
     author: authorName(),
     authorUid: currentUser.uid,
+    replyTo,
     createdAt: new Date().toISOString()
   };
   await setDoc(doc(db, 'trips', currentTripCode, 'comments', comment.id), comment);
@@ -330,6 +391,7 @@ function resetEntryForm() {
   pendingStayType = null; pendingTransportMode = null;
   pendingRating = 0;
   renderStarPicker();
+  document.getElementById('addPlaceTypeForm').hidden = true;
   document.getElementById('fHighlight').checked = false;
   document.getElementById('chkGoedBed').checked = false;
   document.getElementById('chkUitzicht').checked = false;
@@ -426,8 +488,18 @@ const views = document.querySelectorAll('[data-view]');
 function showView(id) {
   views.forEach(v => v.hidden = v.id !== id);
   tabButtons.forEach(b => b.classList.toggle('is-active', b.dataset.target === id));
-  if (id === 'view-kaart') setTimeout(() => { if (map) map.invalidateSize(); }, 50);
-  if (id === 'view-dashboard') setTimeout(() => { if (dashMap) dashMap.invalidateSize(); }, 50);
+  if (id === 'view-kaart') {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      rebuildMap();
+    }));
+  }
+  if (id === 'view-dashboard') {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!dashMap) return;
+      dashMap.invalidateSize();
+      if (dashMapLatLngs.length) dashMap.fitBounds(dashMapLatLngs, { padding: [20, 20] });
+    }));
+  }
   if (id === 'view-overzicht') renderStats();
 }
 tabButtons.forEach(btn => {
@@ -598,9 +670,10 @@ document.getElementById('fHighlight').addEventListener('change', (e) => {
   }
 });
 
-document.querySelectorAll('.pill-chip').forEach((chip) => {
-  chip.addEventListener('click', () => {
-    const row = chip.closest('.chip-row');
+document.querySelectorAll('.type-fields .chip-row').forEach((row) => {
+  row.addEventListener('click', (e) => {
+    const chip = e.target.closest('.pill-chip');
+    if (!chip || chip.id === 'btnAddPlaceType') return;
     const wasActive = chip.classList.contains('is-active');
     row.querySelectorAll('.pill-chip').forEach((c) => c.classList.remove('is-active'));
     if (!wasActive) { chip.classList.add('is-active'); popEffect(chip); }
@@ -610,6 +683,46 @@ document.querySelectorAll('.pill-chip').forEach((chip) => {
     pendingStayType = document.querySelector('#stayTypeRow .pill-chip.is-active')?.dataset.value || null;
     pendingTransportMode = document.querySelector('#transportRow .pill-chip.is-active')?.dataset.value || null;
   });
+});
+
+// ---------- Eigen "soort plek" toevoegen ----------
+function loadCustomPlaceTypes() {
+  try { return JSON.parse(localStorage.getItem('customPlaceTypes') || '[]'); } catch { return []; }
+}
+function renderCustomPlaceTypeChips() {
+  const row = document.getElementById('placeTypeRow');
+  const addBtn = document.getElementById('btnAddPlaceType');
+  loadCustomPlaceTypes().forEach((label) => {
+    if (row.querySelector(`.pill-chip[data-value="${CSS.escape(label)}"]`)) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pill-chip';
+    btn.dataset.value = label;
+    btn.textContent = '📌 ' + label;
+    row.insertBefore(btn, addBtn);
+  });
+}
+renderCustomPlaceTypeChips();
+document.getElementById('btnAddPlaceType').addEventListener('click', () => {
+  const form = document.getElementById('addPlaceTypeForm');
+  form.hidden = !form.hidden;
+  if (!form.hidden) document.getElementById('addPlaceTypeInput').focus();
+});
+document.getElementById('addPlaceTypeForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('addPlaceTypeInput');
+  const clean = input.value.trim().slice(0, 24);
+  if (!clean) return;
+  const list = loadCustomPlaceTypes();
+  if (!list.includes(clean)) {
+    list.push(clean);
+    localStorage.setItem('customPlaceTypes', JSON.stringify(list));
+  }
+  renderCustomPlaceTypeChips();
+  input.value = '';
+  document.getElementById('addPlaceTypeForm').hidden = true;
+  const newChip = document.querySelector(`#placeTypeRow .pill-chip[data-value="${CSS.escape(clean)}"]`);
+  if (newChip) newChip.click();
 });
 
 let pendingRating = 0;
@@ -814,9 +927,13 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   }
 
   // Voorkom de technische Firestore-foutmelding: check zelf even of dit moment
-  // (inclusief foto's) binnen de opslaglimiet van 1MB per document past.
+  // (inclusief foto's) binnen de opslaglimiet van 1MB (1.048.576 bytes) per
+  // document past. Marge bewust klein gehouden: bij nieuwe foto's comprimeert
+  // de app al agressief genoeg, dus we willen bestaande (oudere) momenten die
+  // nét onder de harde grens vallen niet onnodig blokkeren bij simpelweg
+  // opnieuw opslaan.
   const approxSize = new Blob([JSON.stringify(entry)]).size;
-  if (approxSize > 950 * 1024) {
+  if (approxSize > 1010 * 1024) {
     const kb = Math.round(approxSize / 1024);
     toast(`Te groot om op te slaan (${kb}KB) — verwijder een foto of voeg er één minder toe`);
     shakeElement(document.getElementById('photoPreview'));
@@ -870,32 +987,88 @@ function renderTimeline() {
   staggerIn(container.querySelectorAll('.postcard'));
 }
 
+function renderCommentRow(c, day, isReply, replyingToName) {
+  const row = document.createElement('div');
+  row.className = isReply ? 'comment comment--reply' : 'comment';
+  const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
+  row.innerHTML = `
+    <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
+    <div style="flex:1;">
+      ${replyingToName ? `<span class="comment__replying-to">→ antwoord aan ${escapeHtml(replyingToName)}</span>` : ''}
+      <b>${escapeHtml(c.author)}</b>
+      <p>${escapeHtml(c.text)}</p>
+      <div class="comment__actions">
+        <button type="button" class="comment__reply-btn">Reageer</button>
+        ${canRemove ? `<button type="button" class="comment__remove">Verwijderen</button>` : ''}
+      </div>
+      <form class="comment__reply-form" hidden>
+        <input type="text" placeholder="Antwoord aan ${escapeHtml(c.author)}…" maxlength="300">
+        <button type="submit">➤</button>
+      </form>
+    </div>
+  `;
+  const replyBtn = row.querySelector('.comment__reply-btn');
+  const replyForm = row.querySelector('.comment__reply-form');
+  replyBtn.addEventListener('click', () => {
+    replyForm.hidden = !replyForm.hidden;
+    if (!replyForm.hidden) replyForm.querySelector('input').focus();
+  });
+  replyForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = replyForm.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await addComment(day, text, c.id);
+      input.value = '';
+      replyForm.hidden = true;
+    } catch (err) {
+      toast('Reageren mislukt: ' + err.message);
+    }
+    input.disabled = false;
+  });
+  if (canRemove) {
+    row.querySelector('.comment__remove').addEventListener('click', () => removeComment(c.id));
+  }
+  return row;
+}
+
 function renderDayComments(day) {
   const wrap = document.createElement('div');
   wrap.className = 'day-comments';
   const dayComments = allComments.filter(c => c.day === day);
+  const topLevel = dayComments.filter(c => !c.replyTo);
+
+  // Verzamelt alle antwoorden op een reactie, ook antwoorden-op-antwoorden,
+  // maar toont ze allemaal netjes op één inspring-niveau onder de hoofdreactie
+  // (chronologisch), zodat een gesprek nooit "doodloopt".
+  function getAllDescendants(rootId) {
+    const result = [];
+    const queue = [rootId];
+    while (queue.length) {
+      const parentId = queue.shift();
+      dayComments.filter(c => c.replyTo === parentId).forEach((child) => {
+        result.push(child);
+        queue.push(child.id);
+      });
+    }
+    return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
 
   const list = document.createElement('div');
   list.className = 'day-comments__list';
-  if (dayComments.length === 0) {
+  if (topLevel.length === 0) {
     list.innerHTML = '<p class="day-comments__empty">Nog geen reacties op deze dag — wees de eerste!</p>';
   } else {
-    dayComments.forEach((c) => {
-      const row = document.createElement('div');
-      row.className = 'comment';
-      const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
-      row.innerHTML = `
-        <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
-        <div style="flex:1;">
-          <b>${escapeHtml(c.author)}</b>
-          <p>${escapeHtml(c.text)}</p>
-        </div>
-        ${canRemove ? `<button type="button" class="comment__remove" title="Verwijderen">×</button>` : ''}
-      `;
-      if (canRemove) {
-        row.querySelector('.comment__remove').addEventListener('click', () => removeComment(c.id));
-      }
-      list.appendChild(row);
+    topLevel.forEach((c) => {
+      list.appendChild(renderCommentRow(c, day, false));
+      const byId = {}; dayComments.forEach(cm => { byId[cm.id] = cm; });
+      getAllDescendants(c.id).forEach((reply) => {
+        const parent = byId[reply.replyTo];
+        const replyingToName = parent && parent.id !== c.id ? parent.author : null;
+        list.appendChild(renderCommentRow(reply, day, true, replyingToName));
+      });
     });
   }
   wrap.appendChild(list);
@@ -980,6 +1153,84 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
+// ---------- Klikbare statistieken → gefilterde lijst / foto's ----------
+function openFilteredList(kind) {
+  const modal = document.getElementById('entryModal');
+  const cardEl = document.getElementById('entryModalCard');
+  cardEl.innerHTML = '';
+
+  const heading = document.createElement('h3');
+  heading.style.cssText = 'font-family:var(--font-display);margin:0 0 14px;';
+  const body = document.createElement('div');
+
+  if (kind === 'photos') {
+    heading.textContent = "📷 Alle foto's";
+    const photos = [];
+    allEntries.forEach(e => (e.photos || []).forEach(p => photos.push(p)));
+    if (photos.length) {
+      body.className = 'photo-grid';
+      photos.forEach(src => {
+        const img = document.createElement('img');
+        img.src = src;
+        img.className = 'photo-grid__img';
+        body.appendChild(img);
+      });
+    } else {
+      body.innerHTML = '<p class="day-comments__empty">Nog geen foto\'s toegevoegd.</p>';
+    }
+  } else if (kind === 'days') {
+    heading.textContent = '📅 Dagen vastgelegd';
+    const days = [...new Set(allEntries.map(e => e.timestamp.slice(0, 10)))].sort();
+    if (days.length) {
+      body.className = 'filtered-days';
+      days.forEach(d => {
+        const row = document.createElement('div');
+        row.className = 'filtered-day';
+        row.textContent = fmtDayHeading(d);
+        body.appendChild(row);
+      });
+    } else {
+      body.innerHTML = '<p class="day-comments__empty">Nog geen dagen vastgelegd.</p>';
+    }
+  } else {
+    const labelMap = { plek: '📍 Plekken bezocht', eten: '🍴 Maaltijden', slaap: '🛏️ Nachtjes geslapen', highlights: '🏆 Beste van de reis', all: 'Alle momenten' };
+    heading.textContent = labelMap[kind] || kind;
+    const items = kind === 'highlights' ? allEntries.filter(e => e.highlight)
+      : kind === 'all' ? allEntries.slice()
+      : allEntries.filter(e => normType(e.type) === kind);
+    if (items.length) {
+      body.className = 'timeline';
+      items.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp)).forEach(entry => {
+        body.appendChild(renderPostcard(entry)); // renderPostcard's eigen klik opent de detailweergave
+      });
+    } else {
+      body.innerHTML = '<p class="day-comments__empty">Nog niets in deze categorie.</p>';
+    }
+  }
+
+  cardEl.appendChild(heading);
+  cardEl.appendChild(body);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal__close';
+  closeBtn.textContent = 'Sluiten';
+  closeBtn.addEventListener('click', () => closeModal());
+  cardEl.appendChild(closeBtn);
+
+  modal.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
+}
+['statsGrid', 'dashStats'].forEach((id) => {
+  document.getElementById(id).addEventListener('click', (e) => {
+    const card = e.target.closest('.stat-card');
+    if (!card || !card.dataset.filter) return;
+    try {
+      openFilteredList(card.dataset.filter);
+    } catch (err) {
+      toast('Kon lijst niet openen: ' + err.message);
+    }
+  });
+});
+
 function openEntryModal(entry) {
   const modal = document.getElementById('entryModal');
   const card = document.getElementById('entryModalCard');
@@ -1043,10 +1294,10 @@ function renderDashboard() {
   const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
   const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
   grid.innerHTML = `
-    <div class="stat-card"><b>0</b><span>📍 Plekken bezocht</span></div>
-    <div class="stat-card"><b>0</b><span>🍴 Maaltijden</span></div>
-    <div class="stat-card"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
-    <div class="stat-card"><b>0</b><span>Momenten totaal</span></div>
+    <div class="stat-card" data-filter="plek"><b>0</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card" data-filter="eten"><b>0</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card" data-filter="slaap"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card" data-filter="all"><b>0</b><span>Momenten totaal</span></div>
   `;
   const dashVals = [plekken, maaltijden, nachtjes, allEntries.length];
   grid.querySelectorAll('.stat-card b').forEach((b, i) => animateNumber(b, dashVals[i]));
@@ -1080,7 +1331,7 @@ function renderDashboard() {
   renderDashMap();
 }
 
-let dashMap = null, dashMapLayer = null;
+let dashMap = null, dashMapLayer = null, dashMapLatLngs = [];
 function renderDashMap() {
   const withLoc = allEntries.filter(e => e.lat);
   if (!withLoc.length) {
@@ -1100,7 +1351,7 @@ function renderDashMap() {
     dashMapLayer = L.layerGroup().addTo(dashMap);
   }
   dashMapLayer.clearLayers();
-  const latlngs = [];
+  dashMapLatLngs = [];
   withLoc.forEach((entry, i) => {
     const type = normType(entry.type);
     const icon = L.divIcon({
@@ -1108,12 +1359,12 @@ function renderDashMap() {
       iconSize: [22, 22], iconAnchor: [11, 11]
     });
     L.marker([entry.lat, entry.lng], { icon }).addTo(dashMapLayer);
-    latlngs.push([entry.lat, entry.lng]);
+    dashMapLatLngs.push([entry.lat, entry.lng]);
   });
-  L.polyline(latlngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(dashMapLayer);
+  L.polyline(dashMapLatLngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(dashMapLayer);
   setTimeout(() => {
     dashMap.invalidateSize();
-    dashMap.fitBounds(latlngs, { padding: [20, 20] });
+    dashMap.fitBounds(dashMapLatLngs, { padding: [20, 20] });
   }, 60);
 }
 
@@ -1123,21 +1374,36 @@ document.getElementById('btnOpenTijdlijn').addEventListener('click', () => showV
 // ============================================================
 // KAART
 // ============================================================
-let map = null, mapLayer = null;
-function renderMap() {
-  if (!map) {
-    map = L.map('map').setView([52.1, 5.3], 6);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap',
-      maxZoom: 19
-    }).addTo(map);
-    mapLayer = L.layerGroup().addTo(map);
+let map = null, mapLayer = null, mapLatLngs = [];
+
+// De kaart wordt VOLLEDIG opnieuw opgebouwd (niet hergebruikt) telkens als het
+// tabblad wordt geopend. Dat is iets duurder, maar sluit definitief uit dat
+// Leaflet met een verkeerde interne maat blijft zitten (het "ingezoomde"
+// effect) — een probleem dat soms zelfs na invalidateSize() bleef hangen.
+function rebuildMap() {
+  if (map) {
+    try { map.remove(); } catch (e) { /* al verwijderd */ }
+    map = null;
+    mapLayer = null;
   }
+  map = L.map('map').setView([52.1, 5.3], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 19
+  }).addTo(map);
+  mapLayer = L.layerGroup().addTo(map);
+  drawMapMarkers();
+  map.invalidateSize();
+  if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
+}
+
+function drawMapMarkers() {
+  if (!mapLayer) return;
   mapLayer.clearLayers();
   const withLoc = allEntries.filter(e => e.lat);
+  mapLatLngs = [];
   if (withLoc.length === 0) return;
 
-  const latlngs = [];
   withLoc.forEach((entry, i) => {
     const type = normType(entry.type);
     const icon = L.divIcon({
@@ -1147,10 +1413,17 @@ function renderMap() {
     });
     const marker = L.marker([entry.lat, entry.lng], { icon }).addTo(mapLayer);
     marker.bindPopup(`<b>${TYPE_ICON[type]} ${escapeHtml(entry.title)}</b><br>${fmtStamp(entry.timestamp)} · ${entry.author}${entry.locationName ? '<br>' + escapeHtml(entry.locationName) : ''}`);
-    latlngs.push([entry.lat, entry.lng]);
+    mapLatLngs.push([entry.lat, entry.lng]);
   });
-  L.polyline(latlngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(mapLayer);
-  map.fitBounds(latlngs, { padding: [30, 30] });
+  L.polyline(mapLatLngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(mapLayer);
+}
+
+// Als data binnenkomt terwijl het tabblad al open is, gewoon de pinnen verversen
+// (geen volledige heropbouw nodig — dat gebeurt alleen bij het openen zelf).
+function renderMap() {
+  if (!map) return;
+  drawMapMarkers();
+  if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
 }
 
 // ============================================================
@@ -1165,12 +1438,12 @@ function renderStats() {
   const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
   const highlights = allEntries.filter(e => e.highlight).length;
   grid.innerHTML = `
-    <div class="stat-card"><b>0</b><span>📍 Plekken bezocht</span></div>
-    <div class="stat-card"><b>0</b><span>🍴 Maaltijden</span></div>
-    <div class="stat-card"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
-    <div class="stat-card"><b>0</b><span>Dagen vastgelegd</span></div>
-    <div class="stat-card"><b>0</b><span>Foto's</span></div>
-    <div class="stat-card"><b>0</b><span>🏆 Beste van de reis</span></div>
+    <div class="stat-card" data-filter="plek"><b>0</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card" data-filter="eten"><b>0</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card" data-filter="slaap"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card" data-filter="days"><b>0</b><span>Dagen vastgelegd</span></div>
+    <div class="stat-card" data-filter="photos"><b>0</b><span>Foto's</span></div>
+    <div class="stat-card" data-filter="highlights"><b>0</b><span>🏆 Beste van de reis</span></div>
   `;
   const vals = [plekken, maaltijden, nachtjes, days, photos, highlights];
   grid.querySelectorAll('.stat-card b').forEach((b, i) => animateNumber(b, vals[i]));
@@ -1208,7 +1481,7 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 // ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=18').catch(() => {});
   });
 }
 

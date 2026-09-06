@@ -203,11 +203,29 @@ main{
 .day-comments__list{ display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
 .day-comments__empty{ font-size:12.5px; color:#9aa39e; margin:0; font-style:italic; }
 .comment{ display:flex; gap:9px; align-items:flex-start; }
+.comment--reply{ margin-left:26px; opacity:0.92; }
+.comment__replying-to{
+  display:block; font-size:10.5px; font-family:var(--font-mono); color:#9aa39e;
+  margin-bottom:1px;
+}
 .comment b{ font-size:12.5px; font-family:var(--font-display); }
 .comment p{ font-size:13px; margin:1px 0 0; line-height:1.4; color:#3c443f; }
-.comment__remove{
-  background:none; border:none; color:#b6bdb8; font-size:16px; line-height:1;
-  padding:2px 4px; flex-shrink:0;
+.comment__actions{ display:flex; gap:12px; margin-top:3px; }
+.comment__reply-btn, .comment__remove{
+  background:none; border:none; color:#9aa39e; font-size:11px;
+  font-family:var(--font-mono); text-transform:uppercase; letter-spacing:0.3px;
+  padding:2px 0;
+}
+.comment__reply-btn:hover, .comment__remove:hover{ color:var(--jade-dark); }
+.comment__reply-form{ display:flex; gap:6px; margin-top:6px; }
+.comment__reply-form[hidden]{ display:none; }
+.comment__reply-form input{
+  flex:1; border:1.5px solid var(--line); border-radius:16px; padding:6px 12px;
+  font-size:12.5px; background:#fffdf7;
+}
+.comment__reply-form button{
+  background:var(--jade); color:#fff; border:none; border-radius:50%;
+  width:28px; height:28px; flex-shrink:0; font-size:12px;
 }
 .day-comments__form{ display:flex; gap:8px; }
 .day-comments__form input{
@@ -301,10 +319,15 @@ main.is-empty .empty-state{display:block;}
 main.is-empty .timeline{display:none;}
 
 /* ---------- MAP ---------- */
+/* isolation:isolate geeft de kaart een eigen "laag" — Leaflet gebruikt intern
+   hoge z-index-waarden (tot 700) voor pinnen/pop-ups; zonder isolatie konden
+   die boven de bovenbalk of een geopende pop-up uit blijven steken, ongeacht
+   hoe hoog de z-index van die andere elementen zelf werd gezet. */
 #map{
   height:calc(100vh - 260px); min-height:320px;
   border-radius:14px; overflow:hidden;
   border:1px solid var(--line); box-shadow:var(--shadow);
+  position:relative; isolation:isolate;
 }
 .map__note{
   font-size:11.5px; color:#7c8580; margin-top:10px; text-align:center;
@@ -347,6 +370,16 @@ main.is-empty .timeline{display:none;}
 .pill-chip.is-active{
   background:var(--jade); border-color:var(--jade); color:#fff;
 }
+.pill-chip--add{
+  background:transparent; border-style:dashed; color:var(--jade-dark);
+}
+.add-chip-form{ display:flex; gap:8px; margin-top:10px; }
+.add-chip-form[hidden]{ display:none; }
+.add-chip-form input{
+  flex:1; border:1.5px solid var(--line); border-radius:10px; padding:9px 12px;
+  font-size:13.5px; background:#fffdf7;
+}
+.add-chip-form .btn{ padding:9px 14px; font-size:13px; }
 
 .star-picker{ display:flex; gap:4px; }
 .star-btn{
@@ -451,10 +484,11 @@ main.is-empty .timeline{display:none;}
   font-family:var(--font-mono); font-size:28px; font-weight:700; margin:10px 0 0;
 }
 
-.dash-map-wrap{position:relative;}
+.dash-map-wrap{position:relative; isolation:isolate;}
 #dashMap{
   height:180px; border-radius:14px; overflow:hidden;
   border:1px solid var(--line); box-shadow:var(--shadow);
+  position:relative; isolation:isolate;
 }
 .dash-map-open{
   position:absolute; bottom:10px; right:10px;
@@ -463,6 +497,14 @@ main.is-empty .timeline{display:none;}
   border:none; border-radius:20px; padding:7px 12px;
   font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.5px;
 }
+
+/* ---------- GLOBALE FOUTMELDING ---------- */
+#globalErrorBanner{
+  position:fixed; top:0; left:0; right:0; z-index:9999;
+  background:var(--brick); color:#fff; font-size:12.5px; text-align:center;
+  padding:10px 16px; line-height:1.4; cursor:pointer;
+}
+#globalErrorBanner[hidden]{ display:none; }
 
 /* ---------- ONBOARDING ---------- */
 .onboard{
@@ -536,7 +578,9 @@ main.is-empty .timeline{display:none;}
 }
 .stat-card{
   background:#fffdf7; border:1px solid var(--line); border-radius:12px; padding:14px;
+  cursor:pointer; transition:transform 120ms ease-out;
 }
+.stat-card:active{ transform:scale(0.97); }
 .stat-card b{
   font-family:var(--font-display); font-size:26px; display:block; color:var(--jade-dark);
 }
@@ -546,9 +590,21 @@ main.is-empty .timeline{display:none;}
   background:#fffdf7; border:1px solid var(--line); border-radius:14px; padding:16px;
   display:flex; flex-direction:column; gap:10px;
 }
+.panel[hidden]{ display:none; }
 .panel h3{font-family:var(--font-display); margin:0 0 2px; font-size:17px;}
 .panel__hint{font-size:12.5px; color:#7c8580; margin:0 0 6px; line-height:1.5;}
+.followers-list{display:flex; flex-direction:column; gap:8px;}
+.follower-row{display:flex; align-items:center; gap:10px; font-size:13.5px;}
 .import-status{font-size:12px; color:var(--jade-dark); font-family:var(--font-mono); min-height:14px; margin:0;}
+
+/* ---------- GEFILTERDE LIJST (vanuit klikbare statistieken) ---------- */
+.photo-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+.photo-grid__img{ width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; }
+.filtered-days{ display:flex; flex-direction:column; gap:8px; }
+.filtered-day{
+  background:var(--paper-2); border-radius:8px; padding:10px 12px;
+  font-size:13.5px; text-transform:capitalize;
+}
 
 /* ---------- TABBAR ---------- */
 .tabbar{
@@ -581,7 +637,7 @@ main.is-empty .timeline{display:none;}
 /* ---------- MODAL ---------- */
 .modal{
   position:fixed; inset:0; background:rgba(22,48,43,0);
-  display:flex; align-items:flex-end; z-index:50;
+  display:flex; align-items:flex-end; z-index:2000;
   pointer-events:none;
   transition: background 260ms cubic-bezier(0.32,0.72,0,1);
 }
@@ -605,7 +661,7 @@ main.is-empty .timeline{display:none;}
 .toast{
   position:fixed; bottom:96px; left:50%;
   background:var(--ink); color:var(--paper); padding:10px 18px;
-  border-radius:20px; font-size:13px; z-index:60;
+  border-radius:20px; font-size:13px; z-index:3000;
   box-shadow:var(--shadow);
   opacity:0; filter:blur(4px);
   transform:translateX(-50%) translateY(10px) scale(0.92);
