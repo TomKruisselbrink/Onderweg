@@ -50,6 +50,7 @@ const obLoading = document.getElementById('obLoading');
 function obShowError(msg) {
   obError.textContent = msg;
   obError.hidden = false;
+  shakeElement(obError);
 }
 function obClearError() { obError.hidden = true; }
 function obSetLoading(on) { obLoading.hidden = !on; }
@@ -177,9 +178,23 @@ async function enterApp(code, role) {
 
   obScreen.hidden = true;
   document.getElementById('app').hidden = false;
+  showSkeletons();
 
   subscribeToEntries(code);
   subscribeToComments(code);
+}
+
+// Toont rustgevende "laden"-placeholders zolang de eerste realtime-sync nog
+// niet binnen is (bijv. bij een trage verbinding), in plaats van een lege pagina.
+function showSkeletons() {
+  const timeline = document.getElementById('timeline');
+  const dashStats = document.getElementById('dashStats');
+  if (timeline) timeline.innerHTML = '<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>';
+  if (dashStats) {
+    document.getElementById('dashEmpty').hidden = true;
+    document.getElementById('dashContent').hidden = false;
+    dashStats.innerHTML = '<div class="skeleton skeleton-stat"></div><div class="skeleton skeleton-stat"></div><div class="skeleton skeleton-stat"></div><div class="skeleton skeleton-stat"></div>';
+  }
 }
 
 function leaveTrip() {
@@ -429,8 +444,96 @@ function toast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('is-visible')));
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => { t.hidden = true; }, 2400);
+  toast._timer = setTimeout(() => {
+    t.classList.remove('is-visible');
+    setTimeout(() => { t.hidden = true; }, 260);
+  }, 2400);
+}
+
+// ============================================================
+// ANIMATIE-TOOLKIT (ripple, confetti, tel-op, shake, stagger)
+// ============================================================
+
+// Ripple-effect bij het indrukken van een knop (event delegation, dus werkt
+// ook voor knoppen die pas later worden aangemaakt, zoals in de pop-up).
+document.addEventListener('pointerdown', (e) => {
+  const btn = e.target.closest('.btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height) * 1.6;
+  const span = document.createElement('span');
+  span.className = 'ripple';
+  span.style.width = span.style.height = size + 'px';
+  span.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  span.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  btn.appendChild(span);
+  setTimeout(() => span.remove(), 600);
+});
+
+// Kleine "pop" als iemand een chip, type-keuze of ster selecteert.
+function popEffect(el) {
+  el.classList.remove('is-popping');
+  void el.offsetWidth; // forceer reflow zodat de animatie opnieuw start
+  el.classList.add('is-popping');
+  setTimeout(() => el.classList.remove('is-popping'), 350);
+}
+
+// Shake voor foutmeldingen — trekt de aandacht zonder een dialoog te tonen.
+function shakeElement(el) {
+  el.classList.remove('shake');
+  void el.offsetWidth;
+  el.classList.add('shake');
+}
+
+// Confetti-uitbarsting vanaf een gegeven positie (bijv. een net aangevinkt hokje).
+function burstConfetti(x, y) {
+  const colors = ['#D6A419', '#B23A2E', '#2B6E63', '#F5EFDD'];
+  const count = 18;
+  for (let i = 0; i < count; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.style.background = colors[i % colors.length];
+    piece.style.left = x + 'px';
+    piece.style.top = y + 'px';
+    document.body.appendChild(piece);
+    const angle = (Math.PI * 2 * i) / count + (Math.random() * 0.5);
+    const distance = 60 + Math.random() * 70;
+    const dx = Math.cos(angle) * distance;
+    const dy = Math.sin(angle) * distance - 40;
+    const rotate = Math.random() * 480 - 240;
+    const anim = piece.animate([
+      { transform: 'translate(0,0) rotate(0deg)', opacity: 1 },
+      { transform: `translate(${dx}px, ${dy}px) rotate(${rotate}deg)`, opacity: 0 }
+    ], { duration: 750 + Math.random() * 300, easing: 'cubic-bezier(0.22,1,0.36,1)' });
+    anim.onfinish = () => piece.remove();
+  }
+}
+
+// Telt een getal soepel op van 0 naar de doelwaarde (zoals uibeats' Number Ticker).
+function animateNumber(el, target) {
+  const duration = 650;
+  const start = performance.now();
+  function tick(now) {
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3); // ease-out-cubic
+    el.textContent = Math.round(eased * target);
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = target;
+  } else {
+    requestAnimationFrame(tick);
+  }
+}
+
+// Zet gestaffelde bounce-in-animaties op een lijst net-gerenderde elementen.
+function staggerIn(elements, baseDelayMs = 40, maxDelayMs = 320) {
+  elements.forEach((el, i) => {
+    el.classList.add('anim-in');
+    el.style.animationDelay = Math.min(i * baseDelayMs, maxDelayMs) + 'ms';
+  });
 }
 
 // ============================================================
@@ -478,6 +581,7 @@ document.querySelectorAll('.type-chip').forEach(chip => {
   chip.addEventListener('click', () => {
     document.querySelectorAll('.type-chip').forEach(c => c.classList.remove('is-active'));
     chip.classList.add('is-active');
+    popEffect(chip);
     selectedType = chip.dataset.type;
     updateTypeFields();
   });
@@ -487,12 +591,19 @@ document.querySelector('.type-chip[data-type="plek"]').classList.add('is-active'
 let pendingMealType = null, pendingQuickTag = null, pendingPlaceType = null,
     pendingStayType = null, pendingTransportMode = null;
 
+document.getElementById('fHighlight').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    const rect = e.target.getBoundingClientRect();
+    burstConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+});
+
 document.querySelectorAll('.pill-chip').forEach((chip) => {
   chip.addEventListener('click', () => {
     const row = chip.closest('.chip-row');
     const wasActive = chip.classList.contains('is-active');
     row.querySelectorAll('.pill-chip').forEach((c) => c.classList.remove('is-active'));
-    if (!wasActive) chip.classList.add('is-active');
+    if (!wasActive) { chip.classList.add('is-active'); popEffect(chip); }
     pendingMealType = document.querySelector('#mealTypeRow .pill-chip.is-active')?.dataset.value || null;
     pendingQuickTag = document.querySelector('#quickTagRow .pill-chip.is-active')?.dataset.value || null;
     pendingPlaceType = document.querySelector('#placeTypeRow .pill-chip.is-active')?.dataset.value || null;
@@ -513,6 +624,7 @@ document.getElementById('ratingPicker').addEventListener('click', (e) => {
   const val = Number(btn.dataset.value);
   pendingRating = (pendingRating === val) ? 0 : val;
   renderStarPicker();
+  if (pendingRating > 0) popEffect(btn);
 });
 
 function prefillDateTime() {
@@ -621,14 +733,30 @@ function compressImage(file) {
     const reader = new FileReader();
     reader.onload = (e) => { img.src = e.target.result; };
     img.onload = () => {
-      const maxW = 900;
-      const scale = Math.min(1, maxW / img.width);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.55));
+      // Probeer steeds kleiner/harder te comprimeren totdat de foto ruim
+      // binnen budget past — sommige foto's (veel details/contrast) blijven
+      // met een vaste instelling soms te groot voor de opslaglimiet.
+      const targetBytes = 150 * 1024; // streefwaarde per foto (na base64)
+      const attempts = [
+        { w: 900, q: 0.55 },
+        { w: 800, q: 0.45 },
+        { w: 700, q: 0.35 },
+        { w: 600, q: 0.3 },
+        { w: 500, q: 0.25 },
+        { w: 420, q: 0.2 }
+      ];
+      let result = '';
+      for (const a of attempts) {
+        const scale = Math.min(1, a.w / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        result = canvas.toDataURL('image/jpeg', a.q);
+        if (result.length <= targetBytes) break;
+      }
+      resolve(result);
     };
     reader.readAsDataURL(file);
   });
@@ -681,6 +809,15 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     entry.transportMode = pendingTransportMode;
   }
 
+  // Voorkom de technische Firestore-foutmelding: check zelf even of dit moment
+  // (inclusief foto's) binnen de opslaglimiet van 1MB per document past.
+  const approxSize = new Blob([JSON.stringify(entry)]).size;
+  if (approxSize > 950 * 1024) {
+    toast('Te groot om op te slaan — verwijder een foto of maak er één minder scherp');
+    shakeElement(document.getElementById('photoPreview'));
+    return;
+  }
+
   try {
     await saveEntry(entry);
     toast(isEdit ? 'Moment bijgewerkt ✓' : 'Moment bewaard ✓');
@@ -724,6 +861,8 @@ function renderTimeline() {
     groups[day].forEach(entry => container.appendChild(renderPostcard(entry)));
     container.appendChild(renderDayComments(day));
   });
+
+  staggerIn(container.querySelectorAll('.postcard'));
 }
 
 function renderDayComments(day) {
@@ -899,11 +1038,14 @@ function renderDashboard() {
   const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
   const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
   grid.innerHTML = `
-    <div class="stat-card"><b>${plekken}</b><span>📍 Plekken bezocht</span></div>
-    <div class="stat-card"><b>${maaltijden}</b><span>🍴 Maaltijden</span></div>
-    <div class="stat-card"><b>${nachtjes}</b><span>🛏️ Nachtjes geslapen</span></div>
-    <div class="stat-card"><b>${allEntries.length}</b><span>Momenten totaal</span></div>
+    <div class="stat-card"><b>0</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card"><b>0</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card"><b>0</b><span>Momenten totaal</span></div>
   `;
+  const dashVals = [plekken, maaltijden, nachtjes, allEntries.length];
+  grid.querySelectorAll('.stat-card b').forEach((b, i) => animateNumber(b, dashVals[i]));
+  staggerIn(grid.querySelectorAll('.stat-card'), 60);
 
   const now = new Date();
   const future = allEntries
@@ -928,6 +1070,7 @@ function renderDashboard() {
   const recentWrap = document.getElementById('dashRecent');
   recentWrap.innerHTML = '';
   allEntries.slice(-3).reverse().forEach(entry => recentWrap.appendChild(renderPostcard(entry)));
+  staggerIn(recentWrap.querySelectorAll('.postcard'), 70);
 
   renderDashMap();
 }
@@ -1017,13 +1160,16 @@ function renderStats() {
   const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
   const highlights = allEntries.filter(e => e.highlight).length;
   grid.innerHTML = `
-    <div class="stat-card"><b>${plekken}</b><span>📍 Plekken bezocht</span></div>
-    <div class="stat-card"><b>${maaltijden}</b><span>🍴 Maaltijden</span></div>
-    <div class="stat-card"><b>${nachtjes}</b><span>🛏️ Nachtjes geslapen</span></div>
-    <div class="stat-card"><b>${days}</b><span>Dagen vastgelegd</span></div>
-    <div class="stat-card"><b>${photos}</b><span>Foto's</span></div>
-    <div class="stat-card"><b>${highlights}</b><span>🏆 Beste van de reis</span></div>
+    <div class="stat-card"><b>0</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card"><b>0</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card"><b>0</b><span>Dagen vastgelegd</span></div>
+    <div class="stat-card"><b>0</b><span>Foto's</span></div>
+    <div class="stat-card"><b>0</b><span>🏆 Beste van de reis</span></div>
   `;
+  const vals = [plekken, maaltijden, nachtjes, days, photos, highlights];
+  grid.querySelectorAll('.stat-card b').forEach((b, i) => animateNumber(b, vals[i]));
+  staggerIn(grid.querySelectorAll('.stat-card'), 50);
 }
 
 document.getElementById('btnShareCode').addEventListener('click', async () => {

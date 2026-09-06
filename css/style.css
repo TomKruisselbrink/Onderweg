@@ -43,6 +43,87 @@ button:disabled{cursor:not-allowed;}
 }
 .tabbar__btn:active span{ transform:scale(0.88); }
 .tabbar__btn span{ transition: transform 100ms ease-out; display:inline-block; }
+
+/* ============================================================
+   ANIMATIES & MICRO-INTERACTIES
+   Vanilla vertaling van patronen uit uibeats.com, transitions.dev
+   en dice-ui (bounce entrees, ripple, confetti, shake, sliding pill).
+   ============================================================ */
+
+/* --- Bounce-in entree (postcards, statkaarten, next-stop) --- */
+@keyframes bounceIn{
+  0%{ opacity:0; transform:translateY(22px) scale(0.94); }
+  55%{ opacity:1; transform:translateY(-5px) scale(1.012); }
+  75%{ transform:translateY(2px) scale(0.997); }
+  100%{ opacity:1; transform:translateY(0) scale(1); }
+}
+.anim-in{ animation:bounceIn 0.55s cubic-bezier(0.22,1,0.36,1) backwards; }
+
+/* --- Ripple (primaire knoppen) --- */
+.btn{ position:relative; overflow:hidden; }
+.ripple{
+  position:absolute; border-radius:50%; pointer-events:none;
+  background:rgba(255,255,255,0.55); transform:scale(0);
+  animation:rippleOut 550ms ease-out forwards;
+}
+.btn--ghost .ripple{ background:rgba(43,110,99,0.25); }
+@keyframes rippleOut{ to{ transform:scale(1); opacity:0; } }
+
+/* --- Shake (foutmeldingen) --- */
+@keyframes shake{
+  10%,90%{transform:translateX(-1px);}
+  20%,80%{transform:translateX(3px);}
+  30%,50%,70%{transform:translateX(-6px);}
+  40%,60%{transform:translateX(6px);}
+}
+.shake{ animation:shake 0.45s cubic-bezier(.36,.07,.19,.97); }
+
+/* --- Confetti (bij "Beste van de reis") --- */
+.confetti-piece{
+  position:fixed; top:0; left:0; width:8px; height:8px; border-radius:2px;
+  pointer-events:none; z-index:200; will-change:transform, opacity;
+}
+
+/* --- Sterren pop bij selecteren --- */
+@keyframes starPop{
+  0%{ transform:scale(1); }
+  40%{ transform:scale(1.35) rotate(-8deg); }
+  100%{ transform:scale(1) rotate(0); }
+}
+.star-btn.is-popping{ animation:starPop 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+
+/* --- Chip bounce bij selecteren --- */
+@keyframes chipPop{
+  0%{ transform:scale(1); }
+  45%{ transform:scale(1.08); }
+  100%{ transform:scale(1); }
+}
+.pill-chip.is-popping, .type-chip.is-popping{ animation:chipPop 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+
+/* --- Skeleton shimmer (laden) --- */
+@keyframes shimmerSweep{ 0%{ background-position:-300px 0; } 100%{ background-position:300px 0; } }
+.skeleton{
+  border-radius:10px; background:var(--paper-2);
+  background-image:linear-gradient(90deg, var(--paper-2) 0px, rgba(255,255,255,0.7) 40px, var(--paper-2) 80px);
+  background-size:300px 100%; background-repeat:no-repeat;
+  animation:shimmerSweep 1.3s ease-in-out infinite;
+}
+.skeleton-card{ height:92px; margin-bottom:14px; border-radius:12px; }
+.skeleton-stat{ height:78px; border-radius:12px; }
+
+/* --- Postcard tilt-lift bij hover (alleen met muis) --- */
+@media (hover:hover) and (pointer:fine){
+  .postcard{ transition: transform 220ms cubic-bezier(0.22,1,0.36,1), box-shadow 220ms ease; }
+  .postcard:nth-child(odd):hover{ transform:rotate(-0.6deg) translateY(-4px) scale(1.012); box-shadow:0 16px 32px rgba(22,48,43,0.28); }
+  .postcard:nth-child(even):hover{ transform:rotate(0.5deg) translateY(-4px) scale(1.012); box-shadow:0 16px 32px rgba(22,48,43,0.28); }
+  .stat-card{ transition: transform 180ms ease, box-shadow 180ms ease; }
+  .stat-card:hover{ transform:translateY(-3px); box-shadow:var(--shadow); }
+}
+
+@media (prefers-reduced-motion: reduce){
+  .anim-in, .ripple, .shake, .star-btn.is-popping, .pill-chip.is-popping,
+  .type-chip.is-popping, .skeleton, .confetti-piece{ animation:none !important; }
+}
 .postcard:active{ transform:scale(0.99) rotate(0deg) !important; }
 
 @media (prefers-reduced-motion: reduce){
@@ -431,7 +512,18 @@ main.is-empty .timeline{display:none;}
   font-family:var(--font-mono); font-size:28px; font-weight:700; letter-spacing:6px;
   text-align:center; color:var(--jade-dark); background:var(--paper-2);
   border:1.5px dashed var(--jade); border-radius:12px; padding:14px 10px;
+  position:relative; overflow:hidden;
 }
+.trip-code-display::after{
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(115deg, transparent 30%, rgba(214,164,25,0.35) 50%, transparent 70%);
+  background-size:200% 100%; animation:codeShine 3.5s ease-in-out infinite;
+}
+@keyframes codeShine{
+  0%,60%{ background-position:150% 0; }
+  100%{ background-position:-50% 0; }
+}
+@media (prefers-reduced-motion: reduce){ .trip-code-display::after{ animation:none; } }
 
 /* ---------- OVERZICHT ---------- */
 .stats-grid{
@@ -506,10 +598,18 @@ main.is-empty .timeline{display:none;}
 
 /* ---------- TOAST ---------- */
 .toast{
-  position:fixed; bottom:96px; left:50%; transform:translateX(-50%);
+  position:fixed; bottom:96px; left:50%;
   background:var(--ink); color:var(--paper); padding:10px 18px;
   border-radius:20px; font-size:13px; z-index:60;
   box-shadow:var(--shadow);
+  opacity:0; filter:blur(4px);
+  transform:translateX(-50%) translateY(10px) scale(0.92);
+  transition: opacity 260ms cubic-bezier(0.22,1,0.36,1), transform 260ms cubic-bezier(0.22,1,0.36,1), filter 260ms;
+}
+.toast[hidden]{ display:none; }
+.toast.is-visible{
+  opacity:1; filter:blur(0);
+  transform:translateX(-50%) translateY(0) scale(1);
 }
 
 /* ---------- WHO MODAL ---------- */
