@@ -1,4 +1,4 @@
-// MARKER-V19-JS-OK
+// MARKER-V20-JS-OK
 // ============================================================
 // FIREBASE — verbinding, login, realtime data
 // ============================================================
@@ -709,8 +709,7 @@ document.getElementById('btnAddPlaceType').addEventListener('click', () => {
   form.hidden = !form.hidden;
   if (!form.hidden) document.getElementById('addPlaceTypeInput').focus();
 });
-document.getElementById('addPlaceTypeForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+function confirmAddPlaceType() {
   const input = document.getElementById('addPlaceTypeInput');
   const clean = input.value.trim().slice(0, 24);
   if (!clean) return;
@@ -724,6 +723,10 @@ document.getElementById('addPlaceTypeForm').addEventListener('submit', (e) => {
   document.getElementById('addPlaceTypeForm').hidden = true;
   const newChip = document.querySelector(`#placeTypeRow .pill-chip[data-value="${CSS.escape(clean)}"]`);
   if (newChip) newChip.click();
+}
+document.getElementById('btnConfirmAddPlaceType').addEventListener('click', confirmAddPlaceType);
+document.getElementById('addPlaceTypeInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); confirmAddPlaceType(); }
 });
 
 let pendingRating = 0;
@@ -1495,7 +1498,7 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 // ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js?v=19').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=20').catch(() => {});
   });
 }
 
