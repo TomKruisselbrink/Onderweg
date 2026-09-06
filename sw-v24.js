@@ -2,11 +2,11 @@ const CACHE = 'onderweg-v24';
 const SHELL = [
   './',
   './index.html',
-  './css/style-v24.css',
-  './js/app-v24.js',
+  './style-v24.css',
+  './app-v24.js',
   './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
+  './icon-192.png',
+  './icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'
 ];
