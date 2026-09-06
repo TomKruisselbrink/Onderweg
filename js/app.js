@@ -717,7 +717,8 @@ function renderPhotoPreview() {
   pendingPhotos.forEach((src, i) => {
     const item = document.createElement('div');
     item.className = 'photo-preview__item';
-    item.innerHTML = `<img src="${src}"><button type="button" class="photo-preview__remove" data-i="${i}">×</button>`;
+    const kb = Math.round(src.length / 1024);
+    item.innerHTML = `<img src="${src}"><button type="button" class="photo-preview__remove" data-i="${i}">×</button><span class="photo-preview__size">${kb}KB</span>`;
     wrap.appendChild(item);
   });
   wrap.querySelectorAll('.photo-preview__remove').forEach(btn => {
@@ -734,16 +735,19 @@ function compressImage(file) {
     reader.onload = (e) => { img.src = e.target.result; };
     img.onload = () => {
       // Probeer steeds kleiner/harder te comprimeren totdat de foto ruim
-      // binnen budget past — sommige foto's (veel details/contrast) blijven
-      // met een vaste instelling soms te groot voor de opslaglimiet.
-      const targetBytes = 150 * 1024; // streefwaarde per foto (na base64)
+      // binnen budget past — sommige foto's (veel details/contrast, zoals
+      // een wijds uitzicht) blijven met lichte instellingen soms te groot.
+      const targetBytes = 120 * 1024; // streefwaarde per foto (na base64)
       const attempts = [
         { w: 900, q: 0.55 },
         { w: 800, q: 0.45 },
         { w: 700, q: 0.35 },
         { w: 600, q: 0.3 },
         { w: 500, q: 0.25 },
-        { w: 420, q: 0.2 }
+        { w: 420, q: 0.2 },
+        { w: 340, q: 0.16 },
+        { w: 280, q: 0.12 },
+        { w: 220, q: 0.1 }
       ];
       let result = '';
       for (const a of attempts) {
@@ -813,7 +817,8 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
   // (inclusief foto's) binnen de opslaglimiet van 1MB per document past.
   const approxSize = new Blob([JSON.stringify(entry)]).size;
   if (approxSize > 950 * 1024) {
-    toast('Te groot om op te slaan — verwijder een foto of maak er één minder scherp');
+    const kb = Math.round(approxSize / 1024);
+    toast(`Te groot om op te slaan (${kb}KB) — verwijder een foto of voeg er één minder toe`);
     shakeElement(document.getElementById('photoPreview'));
     return;
   }
