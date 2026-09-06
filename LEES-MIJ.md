@@ -4,6 +4,15 @@ Een web-app (PWA) met realtime cloud-synchronisatie via Firebase: jij en Imke
 loggen in met Google en zien elkaars momenten live verschijnen. Familie kan
 meekijken met een reiscode, zonder zelf een account nodig te hebben.
 
+## Belangrijk: bestandsnamen bevatten voortaan een versienummer
+
+Om een hardnekkig cache-probleem bij je hostingprovider te omzeilen, heten de
+JavaScript- en CSS-bestanden voortaan `app-vXX.js` en `style-vXX.css` (met
+een oplopend nummer) in plaats van steeds dezelfde naam. Zo kan er nooit een
+verouderde versie op die naam blijven "plakken" bij Netlify/GitHub. Bij elke
+update van mij krijg je een nieuw versienummer en verandert dus ook de
+bestandsnaam — dat is bedoeld gedrag, geen fout.
+
 ## Voor het eerste gebruik: twee dingen instellen in Firebase
 
 **1. Beveiligingsregels plakken**
