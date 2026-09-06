@@ -1,3 +1,4 @@
+// MARKER-V19-JS-OK
 // ============================================================
 // FIREBASE — verbinding, login, realtime data
 // ============================================================
@@ -1340,6 +1341,11 @@ function renderDashMap() {
   }
   document.getElementById('dashMap').closest('.dash-map-wrap').style.display = '';
 
+  const dashMapEl = document.getElementById('dashMap');
+  dashMapEl.style.isolation = 'isolate';
+  dashMapEl.style.position = 'relative';
+  dashMapEl.style.overflow = 'hidden';
+
   if (!dashMap) {
     dashMap = L.map('dashMap', {
       zoomControl: false, dragging: false, scrollWheelZoom: false,
@@ -1386,6 +1392,14 @@ function rebuildMap() {
     map = null;
     mapLayer = null;
   }
+  // Deze stijlen ook rechtstreeks vanuit JS zetten (niet alleen via het losse
+  // CSS-bestand) — zo werkt de opsluiting van Leaflets interne lagen altijd,
+  // ook als het CSS-bestand ergens onderweg nog gecached zou zijn.
+  const mapEl = document.getElementById('map');
+  mapEl.style.isolation = 'isolate';
+  mapEl.style.position = 'relative';
+  mapEl.style.overflow = 'hidden';
+
   map = L.map('map').setView([52.1, 5.3], 6);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap',
@@ -1481,7 +1495,7 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 // ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js?v=18').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=19').catch(() => {});
   });
 }
 
@@ -1490,3 +1504,9 @@ if ('serviceWorker' in navigator) {
 // ============================================================
 prefillDateTime();
 updateTypeFields();
+
+// Kritieke stijlen ook rechtstreeks vanuit JS forceren (los van het CSS-bestand),
+// zodat de pop-up en toast altijd boven de kaart blijven — ongeacht of het
+// losse CSS-bestand ergens nog gecached zou zijn.
+document.getElementById('entryModal').style.zIndex = '2000';
+document.getElementById('toast').style.zIndex = '3000';

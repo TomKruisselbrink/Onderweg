@@ -1,9 +1,9 @@
-const CACHE = 'onderweg-v18';
+const CACHE = 'onderweg-v19';
 const SHELL = [
   './',
   './index.html',
-  './css/style.css?v=18',
-  './js/app.js?v=18',
+  './css/style.css?v=19',
+  './js/app.js?v=19',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
