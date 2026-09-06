@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style-v24.css">
+<link rel="stylesheet" href="style-v26.css">
 </head>
 <body>
 
@@ -96,6 +96,8 @@
 
   <!-- DASHBOARD -->
   <section class="view" id="view-dashboard" data-view>
+    <div id="familyHeader" hidden></div>
+
     <div class="view__header">
       <h2>Overzicht</h2>
       <span class="count-pill" id="countPillDash">0 momenten</span>
@@ -107,6 +109,8 @@
     </div>
 
     <div id="dashContent" hidden>
+      <div id="todaySection"></div>
+
       <div class="stats-grid" id="dashStats"></div>
 
       <div id="nextStopWrap"></div>
@@ -128,7 +132,20 @@
         </div>
         <div id="dashRecent" class="timeline"></div>
       </div>
+
+      <button type="button" class="btn btn--ghost btn--wide" id="btnOpenAlbum" style="margin-top:16px;">📷 Fotoalbum</button>
     </div>
+  </section>
+
+  <!-- FOTOALBUM -->
+  <section class="view" id="view-album" data-view hidden>
+    <div class="view__header">
+      <button type="button" class="modal__close" id="btnAlbumBack" style="margin:0; text-align:left;">← Terug</button>
+    </div>
+    <div class="view__header">
+      <h2>Fotoalbum</h2>
+    </div>
+    <div id="albumContent"></div>
   </section>
 
   <!-- TIJDLIJN -->
@@ -340,7 +357,7 @@
       <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
 
-    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 25 (zonder service worker)</p>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 26</p>
   </section>
 
 </main>
@@ -357,6 +374,19 @@
 
 <div class="modal" id="entryModal" hidden>
   <div class="modal__card" id="entryModalCard"></div>
+</div>
+
+<div class="photo-viewer" id="photoViewer" hidden>
+  <button type="button" class="photo-viewer__close" id="btnClosePhotoViewer">✕</button>
+  <div class="photo-viewer__img-wrap">
+    <img id="photoViewerImg" src="" alt="">
+  </div>
+  <button type="button" class="photo-viewer__nav photo-viewer__nav--prev" id="btnPhotoPrev">‹</button>
+  <button type="button" class="photo-viewer__nav photo-viewer__nav--next" id="btnPhotoNext">›</button>
+  <div class="photo-viewer__info">
+    <p id="photoViewerCaption"></p>
+    <button type="button" class="btn btn--ghost" id="btnPhotoViewerMoment">Bekijk moment →</button>
+  </div>
 </div>
 
 <div class="toast" id="toast" hidden></div>
@@ -380,7 +410,7 @@ window.addEventListener('unhandledrejection', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
-<script type="module" src="app-v24.js"></script>
+<script type="module" src="app-v26.js"></script>
 </body>
 </html>
 

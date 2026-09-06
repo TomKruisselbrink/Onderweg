@@ -120,6 +120,18 @@ de app is nu simpeler en werkt betrouwbaarder.
 **Reis verlaten / wisselen:** onder Overzicht → "Reis wisselen" → "Verlaat
 deze reis". Handig om te testen, of om aan een andere reis mee te werken.
 
+**Vandaag-sectie:** bovenaan het Dashboard staat een "☀️ Vandaag"-kaartje met
+de belangrijkste info van de huidige dag (locatie, afstand, aantal plekken,
+foto's, hoogtepunt), gevolgd door alle momenten van vandaag.
+
+**Fotoalbum:** alle foto's van de reis op één pagina, gegroepeerd per dag —
+bereikbaar via "📷 Fotoalbum" onderaan het Dashboard of de "Foto's"-tegel bij
+Overzicht. Tik op een foto voor een volledig-scherm weergave met swipen.
+
+**Familie-modus:** volgers zien bovenaan het Dashboard een groene kaart met
+wie onderweg is, de laatste locatie, het dagnummer en hoe lang geleden het
+laatste moment is toegevoegd, plus snelkoppelingen naar Route/Album/Tijdlijn.
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is
