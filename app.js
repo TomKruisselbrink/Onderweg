@@ -1,4 +1,4 @@
-// MARKER-V22-JS-OK
+// MARKER-V23-JS-OK
 // ============================================================
 // FIREBASE — verbinding, login, realtime data
 // ============================================================
@@ -350,7 +350,7 @@ async function saveEntry(entry) {
 async function removeEntry(id) {
   await deleteDoc(doc(db, 'trips', currentTripCode, 'entries', id));
 }
-async function addComment(day, text, replyTo = null, isRecap = false) {
+async function addComment(day, text, replyTo = null) {
   const comment = {
     id: crypto.randomUUID ? crypto.randomUUID() : 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2),
     day,
@@ -358,7 +358,6 @@ async function addComment(day, text, replyTo = null, isRecap = false) {
     author: authorName(),
     authorUid: currentUser.uid,
     replyTo,
-    isRecap: !!isRecap,
     createdAt: new Date().toISOString()
   };
   await setDoc(doc(db, 'trips', currentTripCode, 'comments', comment.id), comment);
@@ -633,9 +632,9 @@ function staggerIn(elements, baseDelayMs = 40, maxDelayMs = 320) {
 // ============================================================
 let selectedType = 'plek';
 
-const TYPE_ICON = { plek: '📍', eten: '🍴', slaap: '🛏️', vervoer: '🚗' };
-const TYPE_LABEL = { plek: 'Plek / Activiteit', eten: 'Eten & Drinken', slaap: 'Slaapplek', vervoer: 'Verplaatsing' };
-const TYPE_COLOR = { plek: '#2B6E63', eten: '#D6A419', slaap: '#B23A2E', vervoer: '#5B6EA8' };
+const TYPE_ICON = { plek: '📍', eten: '🍴', slaap: '🛏️', vervoer: '🚗', recap: '📝' };
+const TYPE_LABEL = { plek: 'Plek / Activiteit', eten: 'Eten & Drinken', slaap: 'Slaapplek', vervoer: 'Verplaatsing', recap: 'Dagrecap' };
+const TYPE_COLOR = { plek: '#2B6E63', eten: '#D6A419', slaap: '#B23A2E', vervoer: '#5B6EA8', recap: '#8a6a0a' };
 const LEGACY_TYPE_MAP = { activiteit: 'plek', overnachting: 'slaap' };
 function normType(type) { return LEGACY_TYPE_MAP[type] || type; }
 
@@ -649,24 +648,28 @@ const TITLE_PLACEHOLDER = {
   eten: 'Bijv. Trattoria da Luigi, Rome',
   plek: 'Bijv. Uitzichtpunt Tre Cime',
   slaap: 'Bijv. Camping Le Pin, Provence',
-  vervoer: 'Bijv. Rit naar Rome'
+  vervoer: 'Bijv. Rit naar Rome',
+  recap: 'Bijv. Recap van zaterdag'
 };
 const NOTE_PLACEHOLDER = {
   eten: 'Wat heb je gegeten en gedronken?',
   plek: 'Sfeer, verhalen of praktische tips',
   slaap: 'Toelichting voor als je er ooit terug wil',
-  vervoer: 'Bijv. "Prachtige bergpas" of "vertraging gehad"'
+  vervoer: 'Bijv. "Prachtige bergpas" of "vertraging gehad"',
+  recap: 'Hoe was de dag als geheel?'
 };
 
 function updateTypeFields() {
   document.querySelectorAll('.type-fields[data-for]').forEach((sec) => {
     sec.hidden = !sec.dataset.for.split(' ').includes(selectedType);
   });
-  document.getElementById('titleLabel').textContent = selectedType === 'vervoer' ? 'Naam / omschrijving rit' : 'Naam / locatie';
+  document.getElementById('titleLabel').textContent = selectedType === 'vervoer' ? 'Naam / omschrijving rit' : (selectedType === 'recap' ? 'Titel' : 'Naam / locatie');
   document.getElementById('fTitle').placeholder = TITLE_PLACEHOLDER[selectedType];
   document.getElementById('noteLabel').textContent = selectedType === 'vervoer' ? 'Karakter van de rit' : 'Aantekening';
   document.getElementById('fNote').placeholder = NOTE_PLACEHOLDER[selectedType];
   document.getElementById('ratingFieldLabel').textContent = selectedType === 'slaap' ? 'Slaapscore' : 'Beoordeling';
+  // Dagrecap gaat niet over een specifieke plek, dus geen locatieveld nodig
+  document.getElementById('locationField').hidden = selectedType === 'recap';
 }
 
 document.querySelectorAll('.type-chip').forEach(chip => {
@@ -1012,13 +1015,11 @@ function renderTimeline() {
 
 function renderCommentRow(c, day, isReply, replyingToName) {
   const row = document.createElement('div');
-  const isRecapRow = !isReply && c.isRecap;
-  row.className = isReply ? 'comment comment--reply' : (isRecapRow ? 'comment comment--recap' : 'comment');
+  row.className = isReply ? 'comment comment--reply' : 'comment';
   const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
   row.innerHTML = `
     <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
     <div style="flex:1;">
-      ${isRecapRow ? `<span class="comment__recap-badge">📝 Dagrecap</span>` : ''}
       ${replyingToName ? `<span class="comment__replying-to">→ antwoord aan ${escapeHtml(replyingToName)}</span>` : ''}
       <b>${escapeHtml(c.author)}</b>
       <p>${escapeHtml(c.text)}</p>
@@ -1064,8 +1065,6 @@ function renderDayComments(day) {
   wrap.className = 'day-comments';
   const dayComments = allComments.filter(c => c.day === day);
   const topLevel = dayComments.filter(c => !c.replyTo);
-  const recaps = topLevel.filter(c => c.isRecap);
-  const regularTopLevel = topLevel.filter(c => !c.isRecap);
   const byId = {};
   dayComments.forEach(cm => { byId[cm.id] = cm; });
 
@@ -1085,30 +1084,19 @@ function renderDayComments(day) {
     return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  function appendWithReplies(container, c) {
-    container.appendChild(renderCommentRow(c, day, false));
-    getAllDescendants(c.id).forEach((reply) => {
-      const parent = byId[reply.replyTo];
-      const replyingToName = parent && parent.id !== c.id ? parent.author : null;
-      container.appendChild(renderCommentRow(reply, day, true, replyingToName));
-    });
-  }
-
-  // Dagrecaps komen bovenaan en apart gestyled, zodat ze nooit ondersneeuwen
-  // tussen de gewone familiereacties.
-  if (recaps.length) {
-    const recapWrap = document.createElement('div');
-    recapWrap.className = 'day-recaps';
-    recaps.forEach((c) => appendWithReplies(recapWrap, c));
-    wrap.appendChild(recapWrap);
-  }
-
   const list = document.createElement('div');
   list.className = 'day-comments__list';
-  if (regularTopLevel.length === 0) {
+  if (topLevel.length === 0) {
     list.innerHTML = '<p class="day-comments__empty">Nog geen reacties op deze dag — wees de eerste!</p>';
   } else {
-    regularTopLevel.forEach((c) => appendWithReplies(list, c));
+    topLevel.forEach((c) => {
+      list.appendChild(renderCommentRow(c, day, false));
+      getAllDescendants(c.id).forEach((reply) => {
+        const parent = byId[reply.replyTo];
+        const replyingToName = parent && parent.id !== c.id ? parent.author : null;
+        list.appendChild(renderCommentRow(reply, day, true, replyingToName));
+      });
+    });
   }
   wrap.appendChild(list);
 
@@ -1131,43 +1119,6 @@ function renderDayComments(day) {
     input.focus();
   });
   wrap.appendChild(form);
-
-  // Alleen Tom/Imke kunnen een dagrecap schrijven — iedereen kan 'm lezen en erop reageren.
-  if (currentRole !== 'follower') {
-    const recapSection = document.createElement('div');
-    recapSection.className = 'recap-compose';
-    recapSection.innerHTML = `
-      <button type="button" class="btn btn--ghost btn--wide recap-add-btn">📝 Schrijf een dagrecap</button>
-      <div class="recap-compose__form" hidden>
-        <textarea rows="4" placeholder="Schrijf een korte samenvatting van deze dag…" maxlength="1000"></textarea>
-        <button type="button" class="btn btn--primary btn--wide recap-submit-btn">Plaats dagrecap</button>
-      </div>
-    `;
-    const toggleBtn = recapSection.querySelector('.recap-add-btn');
-    const composeForm = recapSection.querySelector('.recap-compose__form');
-    const textarea = composeForm.querySelector('textarea');
-    const submitBtn = composeForm.querySelector('.recap-submit-btn');
-    toggleBtn.addEventListener('click', () => {
-      composeForm.hidden = !composeForm.hidden;
-      toggleBtn.hidden = !composeForm.hidden;
-      if (!composeForm.hidden) textarea.focus();
-    });
-    submitBtn.addEventListener('click', async () => {
-      const text = textarea.value.trim();
-      if (!text) return;
-      submitBtn.disabled = true;
-      try {
-        await addComment(day, text, null, true);
-        textarea.value = '';
-        composeForm.hidden = true;
-        toggleBtn.hidden = false;
-      } catch (err) {
-        toast('Recap plaatsen mislukt: ' + err.message);
-      }
-      submitBtn.disabled = false;
-    });
-    wrap.appendChild(recapSection);
-  }
 
   return wrap;
 }
@@ -1570,7 +1521,7 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 // ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js?v=22').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=23').catch(() => {});
   });
 }
 

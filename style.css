@@ -1,4 +1,4 @@
-/* MARKER-V22-CSS-OK */
+/* MARKER-V23-CSS-OK */
 :root{
   --ink:#16302B;
   --paper:#F5EFDD;
@@ -206,26 +206,6 @@ main{
 .comment{ display:flex; gap:9px; align-items:flex-start; }
 .comment--reply{ margin-left:26px; opacity:0.92; }
 
-.day-recaps{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
-.comment--recap{
-  background:linear-gradient(135deg, rgba(214,164,25,0.16), rgba(43,110,99,0.10));
-  border:1.5px solid rgba(214,164,25,0.45);
-  border-radius:12px; padding:12px 14px;
-}
-.comment--recap p{ font-size:14px; line-height:1.6; }
-.comment__recap-badge{
-  display:inline-block; font-family:var(--font-mono); font-size:10px; text-transform:uppercase;
-  letter-spacing:0.5px; color:#8a6a0a; background:rgba(214,164,25,0.22);
-  border-radius:10px; padding:2px 9px; margin-bottom:5px;
-}
-.recap-compose{ margin-top:10px; }
-.recap-add-btn{ font-size:12.5px; }
-.recap-compose__form{ display:flex; flex-direction:column; gap:8px; margin-top:8px; }
-.recap-compose__form[hidden]{ display:none; }
-.recap-compose__form textarea{
-  border:1.5px solid var(--line); border-radius:10px; padding:10px 12px;
-  font-size:13.5px; background:#fffdf7; resize:vertical; font-family:inherit;
-}
 .comment__replying-to{
   display:block; font-size:10.5px; font-family:var(--font-mono); color:#9aa39e;
   margin-bottom:1px;
