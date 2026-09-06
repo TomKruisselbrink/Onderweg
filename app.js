@@ -482,19 +482,19 @@ function showView(id) {
   views.forEach(v => v.hidden = v.id !== id);
   tabButtons.forEach(b => b.classList.toggle('is-active', b.dataset.target === id));
   if (id === 'view-kaart') {
-    ensureMap();
-    renderMap();
-    setTimeout(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      ensureMap();
+      renderMap();
       map.invalidateSize();
       if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
-    }, 60);
+    }));
   }
   if (id === 'view-dashboard') {
-    setTimeout(() => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!dashMap) return;
       dashMap.invalidateSize();
       if (dashMapLatLngs.length) dashMap.fitBounds(dashMapLatLngs, { padding: [20, 20] });
-    }, 60);
+    }));
   }
   if (id === 'view-overzicht') renderStats();
 }
