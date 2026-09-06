@@ -717,7 +717,8 @@ function renderPhotoPreview() {
   pendingPhotos.forEach((src, i) => {
     const item = document.createElement('div');
     item.className = 'photo-preview__item';
-    item.innerHTML = `<img src="${src}"><button type="button" class="photo-preview__remove" data-i="${i}">×</button>`;
+    const kb = Math.round(src.length / 1024);
+    item.innerHTML = `<img src="${src}"><button type="button" class="photo-preview__remove" data-i="${i}">×</button><span class="photo-preview__size">${kb}KB</span>`;
     wrap.appendChild(item);
   });
   wrap.querySelectorAll('.photo-preview__remove').forEach(btn => {
@@ -733,14 +734,33 @@ function compressImage(file) {
     const reader = new FileReader();
     reader.onload = (e) => { img.src = e.target.result; };
     img.onload = () => {
-      const maxW = 900;
-      const scale = Math.min(1, maxW / img.width);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.55));
+      // Probeer steeds kleiner/harder te comprimeren totdat de foto ruim
+      // binnen budget past — sommige foto's (veel details/contrast, zoals
+      // een wijds uitzicht) blijven met lichte instellingen soms te groot.
+      const targetBytes = 120 * 1024; // streefwaarde per foto (na base64)
+      const attempts = [
+        { w: 900, q: 0.55 },
+        { w: 800, q: 0.45 },
+        { w: 700, q: 0.35 },
+        { w: 600, q: 0.3 },
+        { w: 500, q: 0.25 },
+        { w: 420, q: 0.2 },
+        { w: 340, q: 0.16 },
+        { w: 280, q: 0.12 },
+        { w: 220, q: 0.1 }
+      ];
+      let result = '';
+      for (const a of attempts) {
+        const scale = Math.min(1, a.w / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        result = canvas.toDataURL('image/jpeg', a.q);
+        if (result.length <= targetBytes) break;
+      }
+      resolve(result);
     };
     reader.readAsDataURL(file);
   });
@@ -791,6 +811,20 @@ document.getElementById('entryForm').addEventListener('submit', async (e) => {
     entry.fromPlace = document.getElementById('fFrom').value.trim();
     entry.toPlace = document.getElementById('fTo').value.trim();
     entry.transportMode = pendingTransportMode;
+  }
+
+  // Voorkom de technische Firestore-foutmelding: check zelf even of dit moment
+  // (inclusief foto's) binnen de opslaglimiet van 1MB (1.048.576 bytes) per
+  // document past. Marge bewust klein gehouden: bij nieuwe foto's comprimeert
+  // de app al agressief genoeg, dus we willen bestaande (oudere) momenten die
+  // nét onder de harde grens vallen niet onnodig blokkeren bij simpelweg
+  // opnieuw opslaan.
+  const approxSize = new Blob([JSON.stringify(entry)]).size;
+  if (approxSize > 1010 * 1024) {
+    const kb = Math.round(approxSize / 1024);
+    toast(`Te groot om op te slaan (${kb}KB) — verwijder een foto of voeg er één minder toe`);
+    shakeElement(document.getElementById('photoPreview'));
+    return;
   }
 
   try {
