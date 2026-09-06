@@ -1,3 +1,4 @@
+// MARKER-V21-JS-OK
 // ============================================================
 // FIREBASE — verbinding, login, realtime data
 // ============================================================
@@ -317,12 +318,24 @@ function renderFollowers() {
     wrap.innerHTML = '<p class="panel__hint" style="margin:0;">Nog niemand meegekeken — deel de reiscode hierboven.</p>';
     return;
   }
-  wrap.innerHTML = allFollowers.map(f => `
-    <div class="follower-row">
+  wrap.innerHTML = '';
+  allFollowers.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'follower-row';
+    row.innerHTML = `
       <span class="author-dot" style="background:${authorColor(f.name)}">${escapeHtml(f.name.slice(0, 1).toUpperCase())}</span>
-      <span>${escapeHtml(f.name)}</span>
-    </div>
-  `).join('');
+      <span style="flex:1;">${escapeHtml(f.name)}</span>
+      <button type="button" class="comment__remove" title="Verwijderen">×</button>
+    `;
+    row.querySelector('.comment__remove').addEventListener('click', () => {
+      if (confirm(`"${f.name}" verwijderen uit deze lijst?`)) {
+        deleteDoc(doc(db, 'trips', currentTripCode, 'followers', f.uid)).catch((err) => {
+          toast('Verwijderen mislukt: ' + err.message);
+        });
+      }
+    });
+    wrap.appendChild(row);
+  });
 }
 
 async function saveEntry(entry) {
@@ -331,7 +344,7 @@ async function saveEntry(entry) {
 async function removeEntry(id) {
   await deleteDoc(doc(db, 'trips', currentTripCode, 'entries', id));
 }
-async function addComment(day, text, replyTo = null) {
+async function addComment(day, text, replyTo = null, isRecap = false) {
   const comment = {
     id: crypto.randomUUID ? crypto.randomUUID() : 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2),
     day,
@@ -339,6 +352,7 @@ async function addComment(day, text, replyTo = null) {
     author: authorName(),
     authorUid: currentUser.uid,
     replyTo,
+    isRecap: !!isRecap,
     createdAt: new Date().toISOString()
   };
   await setDoc(doc(db, 'trips', currentTripCode, 'comments', comment.id), comment);
@@ -708,8 +722,7 @@ document.getElementById('btnAddPlaceType').addEventListener('click', () => {
   form.hidden = !form.hidden;
   if (!form.hidden) document.getElementById('addPlaceTypeInput').focus();
 });
-document.getElementById('addPlaceTypeForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+function confirmAddPlaceType() {
   const input = document.getElementById('addPlaceTypeInput');
   const clean = input.value.trim().slice(0, 24);
   if (!clean) return;
@@ -723,6 +736,10 @@ document.getElementById('addPlaceTypeForm').addEventListener('submit', (e) => {
   document.getElementById('addPlaceTypeForm').hidden = true;
   const newChip = document.querySelector(`#placeTypeRow .pill-chip[data-value="${CSS.escape(clean)}"]`);
   if (newChip) newChip.click();
+}
+document.getElementById('btnConfirmAddPlaceType').addEventListener('click', confirmAddPlaceType);
+document.getElementById('addPlaceTypeInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); confirmAddPlaceType(); }
 });
 
 let pendingRating = 0;
@@ -989,11 +1006,13 @@ function renderTimeline() {
 
 function renderCommentRow(c, day, isReply, replyingToName) {
   const row = document.createElement('div');
-  row.className = isReply ? 'comment comment--reply' : 'comment';
+  const isRecapRow = !isReply && c.isRecap;
+  row.className = isReply ? 'comment comment--reply' : (isRecapRow ? 'comment comment--recap' : 'comment');
   const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
   row.innerHTML = `
     <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
     <div style="flex:1;">
+      ${isRecapRow ? `<span class="comment__recap-badge">📝 Dagrecap</span>` : ''}
       ${replyingToName ? `<span class="comment__replying-to">→ antwoord aan ${escapeHtml(replyingToName)}</span>` : ''}
       <b>${escapeHtml(c.author)}</b>
       <p>${escapeHtml(c.text)}</p>
@@ -1039,6 +1058,10 @@ function renderDayComments(day) {
   wrap.className = 'day-comments';
   const dayComments = allComments.filter(c => c.day === day);
   const topLevel = dayComments.filter(c => !c.replyTo);
+  const recaps = topLevel.filter(c => c.isRecap);
+  const regularTopLevel = topLevel.filter(c => !c.isRecap);
+  const byId = {};
+  dayComments.forEach(cm => { byId[cm.id] = cm; });
 
   // Verzamelt alle antwoorden op een reactie, ook antwoorden-op-antwoorden,
   // maar toont ze allemaal netjes op één inspring-niveau onder de hoofdreactie
@@ -1056,20 +1079,30 @@ function renderDayComments(day) {
     return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  function appendWithReplies(container, c) {
+    container.appendChild(renderCommentRow(c, day, false));
+    getAllDescendants(c.id).forEach((reply) => {
+      const parent = byId[reply.replyTo];
+      const replyingToName = parent && parent.id !== c.id ? parent.author : null;
+      container.appendChild(renderCommentRow(reply, day, true, replyingToName));
+    });
+  }
+
+  // Dagrecaps komen bovenaan en apart gestyled, zodat ze nooit ondersneeuwen
+  // tussen de gewone familiereacties.
+  if (recaps.length) {
+    const recapWrap = document.createElement('div');
+    recapWrap.className = 'day-recaps';
+    recaps.forEach((c) => appendWithReplies(recapWrap, c));
+    wrap.appendChild(recapWrap);
+  }
+
   const list = document.createElement('div');
   list.className = 'day-comments__list';
-  if (topLevel.length === 0) {
+  if (regularTopLevel.length === 0) {
     list.innerHTML = '<p class="day-comments__empty">Nog geen reacties op deze dag — wees de eerste!</p>';
   } else {
-    topLevel.forEach((c) => {
-      list.appendChild(renderCommentRow(c, day, false));
-      const byId = {}; dayComments.forEach(cm => { byId[cm.id] = cm; });
-      getAllDescendants(c.id).forEach((reply) => {
-        const parent = byId[reply.replyTo];
-        const replyingToName = parent && parent.id !== c.id ? parent.author : null;
-        list.appendChild(renderCommentRow(reply, day, true, replyingToName));
-      });
-    });
+    regularTopLevel.forEach((c) => appendWithReplies(list, c));
   }
   wrap.appendChild(list);
 
@@ -1092,6 +1125,43 @@ function renderDayComments(day) {
     input.focus();
   });
   wrap.appendChild(form);
+
+  // Alleen Tom/Imke kunnen een dagrecap schrijven — iedereen kan 'm lezen en erop reageren.
+  if (currentRole !== 'follower') {
+    const recapSection = document.createElement('div');
+    recapSection.className = 'recap-compose';
+    recapSection.innerHTML = `
+      <button type="button" class="btn btn--ghost btn--wide recap-add-btn">📝 Schrijf een dagrecap</button>
+      <div class="recap-compose__form" hidden>
+        <textarea rows="4" placeholder="Schrijf een korte samenvatting van deze dag…" maxlength="1000"></textarea>
+        <button type="button" class="btn btn--primary btn--wide recap-submit-btn">Plaats dagrecap</button>
+      </div>
+    `;
+    const toggleBtn = recapSection.querySelector('.recap-add-btn');
+    const composeForm = recapSection.querySelector('.recap-compose__form');
+    const textarea = composeForm.querySelector('textarea');
+    const submitBtn = composeForm.querySelector('.recap-submit-btn');
+    toggleBtn.addEventListener('click', () => {
+      composeForm.hidden = !composeForm.hidden;
+      toggleBtn.hidden = !composeForm.hidden;
+      if (!composeForm.hidden) textarea.focus();
+    });
+    submitBtn.addEventListener('click', async () => {
+      const text = textarea.value.trim();
+      if (!text) return;
+      submitBtn.disabled = true;
+      try {
+        await addComment(day, text, null, true);
+        textarea.value = '';
+        composeForm.hidden = true;
+        toggleBtn.hidden = false;
+      } catch (err) {
+        toast('Recap plaatsen mislukt: ' + err.message);
+      }
+      submitBtn.disabled = false;
+    });
+    wrap.appendChild(recapSection);
+  }
 
   return wrap;
 }
@@ -1340,6 +1410,11 @@ function renderDashMap() {
   }
   document.getElementById('dashMap').closest('.dash-map-wrap').style.display = '';
 
+  const dashMapEl = document.getElementById('dashMap');
+  dashMapEl.style.isolation = 'isolate';
+  dashMapEl.style.position = 'relative';
+  dashMapEl.style.overflow = 'hidden';
+
   if (!dashMap) {
     dashMap = L.map('dashMap', {
       zoomControl: false, dragging: false, scrollWheelZoom: false,
@@ -1386,6 +1461,14 @@ function rebuildMap() {
     map = null;
     mapLayer = null;
   }
+  // Deze stijlen ook rechtstreeks vanuit JS zetten (niet alleen via het losse
+  // CSS-bestand) — zo werkt de opsluiting van Leaflets interne lagen altijd,
+  // ook als het CSS-bestand ergens onderweg nog gecached zou zijn.
+  const mapEl = document.getElementById('map');
+  mapEl.style.isolation = 'isolate';
+  mapEl.style.position = 'relative';
+  mapEl.style.overflow = 'hidden';
+
   map = L.map('map').setView([52.1, 5.3], 6);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap',
@@ -1481,7 +1564,7 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 // ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js?v=18').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=21').catch(() => {});
   });
 }
 
@@ -1490,3 +1573,9 @@ if ('serviceWorker' in navigator) {
 // ============================================================
 prefillDateTime();
 updateTypeFields();
+
+// Kritieke stijlen ook rechtstreeks vanuit JS forceren (los van het CSS-bestand),
+// zodat de pop-up en toast altijd boven de kaart blijven — ongeacht of het
+// losse CSS-bestand ergens nog gecached zou zijn.
+document.getElementById('entryModal').style.zIndex = '2000';
+document.getElementById('toast').style.zIndex = '3000';
