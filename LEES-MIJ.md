@@ -110,9 +110,12 @@ voor de volgende keer.
 **Realtime:** zodra jij of Imke iets toevoegt, verschijnt het (bij internet)
 meteen op elkaars scherm en bij iedereen die meekijkt.
 
-**Offline:** werkt nog steeds zonder internet — Firestore heeft een eigen
-ingebouwd offline-geheugen. Wat je zonder bereik toevoegt, synchroniseert
-automatisch zodra er weer verbinding is.
+**Internet nodig:** de app is gebouwd voor gebruik met een actieve
+internetverbinding (WiFi of mobiele data). We hadden eerder een laag
+toegevoegd om ook zonder bereik te kunnen werken, maar die gaf in de praktijk
+vooral update-problemen (oude versies die op toestellen bleven "plakken").
+Omdat er bij gebruik altijd internet is, hebben we die laag verwijderd —
+de app is nu simpeler en werkt betrouwbaarder.
 
 **Reis verlaten / wisselen:** onder Overzicht → "Reis wisselen" → "Verlaat
 deze reis". Handig om te testen, of om aan een andere reis mee te werken.

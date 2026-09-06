@@ -1517,12 +1517,22 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 });
 
 // ============================================================
-// SERVICE WORKER
-// ============================================================
+// SERVICE WORKER — bewust NIET meer gebruikt.
+// De app werkte hiermee ook offline, maar dit bleek in de praktijk telkens
+// oude versies van de app "vast te houden" op toestellen, wat veel verwarring
+// gaf. Omdat er altijd internet beschikbaar is bij gebruik, schrappen we deze
+// laag helemaal — en ruimen we meteen elke eerder geïnstalleerde service
+// worker actief op, zodat iedereen die 'm ooit heeft gehad er vanzelf
+// vanaf komt zonder zelf iets te hoeven doen.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw-v24.js').catch(() => {});
-  });
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((reg) => reg.unregister());
+  }).catch(() => {});
+  if (window.caches) {
+    caches.keys().then((names) => {
+      names.forEach((name) => caches.delete(name));
+    }).catch(() => {});
+  }
 }
 
 // ============================================================
