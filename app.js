@@ -1,4 +1,4 @@
-// MARKER-V21-JS-OK
+// MARKER-V22-JS-OK
 // ============================================================
 // FIREBASE — verbinding, login, realtime data
 // ============================================================
@@ -251,9 +251,15 @@ onAuthStateChanged(auth, (user) => {
   if (!user) return;
 
   const savedCode = localStorage.getItem('tripCode');
-  const savedRole = localStorage.getItem('tripRole');
-  if (savedCode && savedRole) {
-    enterApp(savedCode, savedRole);
+  if (savedCode) {
+    // De rol wordt bepaald door hóé je daadwerkelijk bent ingelogd (Google-account
+    // = reiziger, anoniem = volger) — niet door een eerder opgeslagen waarde in
+    // localStorage. Die kan verouderd zijn als dit toestel ooit voor beide rollen
+    // is gebruikt (bijv. tijdens het testen), en zou anders de verkeerde rol
+    // blijven tonen ook nadat iemand echt met Google inlogt.
+    const role = user.isAnonymous ? 'follower' : 'traveler';
+    localStorage.setItem('tripRole', role);
+    enterApp(savedCode, role);
     return;
   }
 
@@ -1564,7 +1570,7 @@ document.getElementById('btnCopyCode').addEventListener('click', async () => {
 // ============================================================
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js?v=21').catch(() => {});
+    navigator.serviceWorker.register('sw.js?v=22').catch(() => {});
   });
 }
 
