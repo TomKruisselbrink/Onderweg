@@ -152,6 +152,32 @@ telefoon/browser, waarmee je het reisdagboek als PDF kunt opslaan of
 printen (dit gebruikt de ingebouwde print-functie van je toestel, geen
 aparte dienst).
 
+**Weer bij een moment:** bij "Nieuw moment" kun je optioneel aangeven hoe het
+weer was (☀️ Zonnig, ⛅ Bewolkt, 🌧️ Regen, ⛈️ Onweer, ❄️ Sneeuw, 💨 Winderig,
+🌫️ Mist). Dit verschijnt als badge op het moment, en de unieke weertypes van
+een hele dag staan ook samengevat bij de dag-koptekst in de Tijdlijn, de
+"Vandaag"-sectie op het Dashboard, en in het Reisdagboek.
+
+**Volgorde:** Tijdlijn en Fotoalbum tonen nu de nieuwste dag bovenaan (hoe
+verder naar beneden, hoe ouder). Het Reisdagboek blijft bewust chronologisch
+(dag 1 eerst), omdat je dat als een verhaal van begin tot eind leest.
+
+**Reageren op vandaag, vanaf het Dashboard:** onder de "Vandaag"-sectie staat
+nu een opvallend goudkleurig kader met "💬 Praat mee over vandaag!" — familie
+hoeft niet meer naar de Tijdlijn te navigeren om te kunnen reageren op de
+huidige dag.
+
+**Zelfherstellende foutmelding:** als er ooit iets misgaat bij het laden
+(bijv. bij iemand die nog een oude, vastzittende versie van de app heeft),
+verschijnt de rode foutbalk nu met een knop "🔄 Probeer te herstellen". Die
+knop ruimt zelf eventuele oude service workers en caches op en herlaadt de
+pagina — zonder dat iemand naar telefooninstellingen hoeft te gaan. Dit werkt
+zelfs als de rest van de app niet kan laden, want de knop zit in een apart,
+altijd-werkend stukje code vóór de rest van de app. **Let op:** dit helpt
+iedereen die vanaf nu een probleem tegenkomt, maar iemand die al vóór deze
+update vastzat op een hele oude, gecachete pagina moet nog één keer de
+handmatige stappen doorlopen (zie hierboven) — daarna nooit meer.
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is

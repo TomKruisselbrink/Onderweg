@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style-v30.css">
+<link rel="stylesheet" href="style-v32.css">
 </head>
 <body>
 
@@ -110,6 +110,7 @@
 
     <div id="dashContent" hidden>
       <div id="todaySection"></div>
+      <div id="todayCommentsSection"></div>
 
       <div class="stats-grid" id="dashStats"></div>
 
@@ -331,6 +332,19 @@
         </label>
       </div>
 
+      <div class="field">
+        <span>Weer (optioneel)</span>
+        <div class="chip-row" id="weatherRow">
+          <button type="button" class="pill-chip" data-value="zonnig">☀️ Zonnig</button>
+          <button type="button" class="pill-chip" data-value="bewolkt">⛅ Bewolkt</button>
+          <button type="button" class="pill-chip" data-value="regen">🌧️ Regen</button>
+          <button type="button" class="pill-chip" data-value="onweer">⛈️ Onweer</button>
+          <button type="button" class="pill-chip" data-value="sneeuw">❄️ Sneeuw</button>
+          <button type="button" class="pill-chip" data-value="winderig">💨 Winderig</button>
+          <button type="button" class="pill-chip" data-value="mist">🌫️ Mist</button>
+        </div>
+      </div>
+
       <div class="field" id="locationField">
         <span>Locatie</span>
         <div class="address-search">
@@ -384,7 +398,7 @@
       <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
 
-    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 30</p>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 32</p>
   </section>
 
 </main>
@@ -423,12 +437,54 @@
 // Vangt fouten op tijdens het laden/uitvoeren van de app en toont ze altijd
 // zichtbaar (via een balk bovenin, ongeacht welk scherm actief is), zodat een
 // probleem nooit meer "stil" blijft — ook zonder ontwikkelaarsconsole.
+//
+// Deze balk bevat ook een "Probeer te herstellen"-knop die ALTIJD werkt, ook
+// als de rest van de app (app-vXX.js) niet eens kan laden — precies voor het
+// geval dat iemand nog een oude, vastzittende service worker/cache heeft van
+// vóór we die hebben weggehaald. De knop ruimt dat rechtstreeks op met de
+// kale browser-API's, zonder dat de app zelf daarvoor hoeft te werken.
 function showGlobalError(msg) {
   var banner = document.getElementById('globalErrorBanner');
   if (!banner) return;
-  banner.textContent = '⚠️ ' + msg + ' (tik om te sluiten)';
+  banner.innerHTML = '';
+  var text = document.createElement('span');
+  text.textContent = '⚠️ ' + msg;
+  banner.appendChild(text);
+  var fixBtn = document.createElement('button');
+  fixBtn.type = 'button';
+  fixBtn.id = 'globalErrorFixBtn';
+  fixBtn.textContent = '🔄 Probeer te herstellen';
+  fixBtn.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    hardResetApp();
+  });
+  banner.appendChild(fixBtn);
+  var closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.id = 'globalErrorCloseBtn';
+  closeBtn.textContent = 'Sluiten';
+  closeBtn.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    banner.hidden = true;
+  });
+  banner.appendChild(closeBtn);
   banner.hidden = false;
-  banner.onclick = function () { banner.hidden = true; };
+}
+function hardResetApp() {
+  var tasks = [];
+  if ('serviceWorker' in navigator) {
+    tasks.push(navigator.serviceWorker.getRegistrations().then(function (regs) {
+      return Promise.all(regs.map(function (r) { return r.unregister(); }));
+    }).catch(function () {}));
+  }
+  if (window.caches) {
+    tasks.push(caches.keys().then(function (names) {
+      return Promise.all(names.map(function (n) { return caches.delete(n); }));
+    }).catch(function () {}));
+  }
+  Promise.all(tasks).finally(function () {
+    location.reload();
+  });
 }
 window.addEventListener('error', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.message || (e.target && e.target.src) || 'onbekende fout'));
@@ -437,7 +493,7 @@ window.addEventListener('unhandledrejection', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
-<script type="module" src="app-v30.js"></script>
+<script type="module" src="app-v32.js"></script>
 </body>
 </html>
 
