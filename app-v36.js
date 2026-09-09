@@ -1,0 +1,2282 @@
+// MARKER-V36-JS-OK
+// ============================================================
+// FIREBASE — verbinding, login, realtime data
+// ============================================================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import {
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
+  signInAnonymously, onAuthStateChanged, signOut, updateProfile
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import {
+  getFirestore, doc, setDoc, updateDoc, deleteDoc, getDoc, collection,
+  query, orderBy, onSnapshot, arrayUnion, enableIndexedDbPersistence
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAESp3mAYnvHhtpIIRY9QyJwqUciBmijdM",
+  authDomain: "jut-en-juul-op-vakantie.firebaseapp.com",
+  projectId: "jut-en-juul-op-vakantie",
+  storageBucket: "jut-en-juul-op-vakantie.firebasestorage.app",
+  messagingSenderId: "564201748696",
+  appId: "1:564201748696:web:f49f0e3303ce7c0d4dffad",
+  measurementId: "G-JFD9ZZJ9CN"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+enableIndexedDbPersistence(db).catch(() => { /* meerdere tabbladen open o.i.d. — niet kritiek */ });
+
+let currentUser = null;
+let currentTripCode = null;
+let currentRole = null; // 'traveler' | 'follower'
+let unsubscribeEntries = null;
+
+function authorName() {
+  if (!currentUser) return 'Reisgenoot';
+  return currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'Reisgenoot');
+}
+function generateTripCode() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // zonder verwarrende tekens (0/O, 1/I/L)
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// ---------- Onboarding UI ----------
+const obScreen = document.getElementById('onboardScreen');
+const obError = document.getElementById('obError');
+const obLoading = document.getElementById('obLoading');
+
+function obShowError(msg) {
+  obError.textContent = msg;
+  obError.hidden = false;
+  shakeElement(obError);
+}
+function obClearError() { obError.hidden = true; }
+function obSetLoading(on) { obLoading.hidden = !on; }
+function obShowStep(id) {
+  document.querySelectorAll('.onboard__step').forEach(s => s.hidden = s.id !== id);
+  obClearError();
+}
+
+document.getElementById('obTraveler').addEventListener('click', async () => {
+  obClearError();
+  obSetLoading(true);
+  const provider = new GoogleAuthProvider();
+  try {
+    const result = await signInWithPopup(auth, provider);
+    currentUser = result.user;
+    obSetLoading(false);
+    obShowStep('obStepTraveler');
+  } catch (err) {
+    if (err && err.code === 'auth/popup-closed-by-user') {
+      obSetLoading(false);
+      return; // gebruiker sloot de pop-up zelf, geen foutmelding nodig
+    }
+    if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request')) {
+      // val terug op omleiden als pop-ups niet toegestaan zijn in deze browser
+      try {
+        await signInWithRedirect(auth, provider);
+        return;
+      } catch (err2) {
+        obSetLoading(false);
+        obShowError('Inloggen mislukt: ' + err2.message);
+        return;
+      }
+    }
+    obSetLoading(false);
+    obShowError('Inloggen mislukt: ' + err.message);
+  }
+});
+document.getElementById('obFollower').addEventListener('click', () => {
+  obShowStep('obStepFollower');
+});
+document.getElementById('obBackFromTraveler').addEventListener('click', () => obShowStep('obStepRole'));
+document.getElementById('obBackFromFollower').addEventListener('click', () => obShowStep('obStepRole'));
+
+document.getElementById('obCreateTrip').addEventListener('click', async () => {
+  obClearError();
+  obSetLoading(true);
+  try {
+    const name = document.getElementById('obTripNameInput').value.trim() || 'Jut en Juul op vakantie';
+    let code, exists = true, attempts = 0;
+    while (exists && attempts < 8) {
+      code = generateTripCode();
+      const snap = await getDoc(doc(db, 'trips', code));
+      exists = snap.exists();
+      attempts++;
+    }
+    await setDoc(doc(db, 'trips', code), {
+      name,
+      ownerUids: [currentUser.uid],
+      createdAt: new Date().toISOString()
+    });
+    localStorage.setItem('tripCode', code);
+    localStorage.setItem('tripRole', 'traveler');
+    enterApp(code, 'traveler');
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Kon geen reis aanmaken: ' + err.message);
+  }
+});
+
+document.getElementById('obJoinTrip').addEventListener('click', async () => {
+  obClearError();
+  const code = document.getElementById('obJoinCodeInput').value.trim().toUpperCase();
+  if (code.length !== 6) { obShowError('Vul een geldige 6-tekens reiscode in.'); return; }
+  obSetLoading(true);
+  try {
+    const ref = doc(db, 'trips', code);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { obSetLoading(false); obShowError('Deze reiscode bestaat niet.'); return; }
+    await updateDoc(ref, { ownerUids: arrayUnion(currentUser.uid) });
+    localStorage.setItem('tripCode', code);
+    localStorage.setItem('tripRole', 'traveler');
+    enterApp(code, 'traveler');
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Kon niet bij deze reis komen: ' + err.message);
+  }
+});
+
+document.getElementById('obFollowGo').addEventListener('click', async () => {
+  obClearError();
+  const name = document.getElementById('obFollowNameInput').value.trim();
+  const code = document.getElementById('obFollowCodeInput').value.trim().toUpperCase();
+  if (!name) { obShowError('Vul je naam in, zodat je herkenbaar bent als je reageert.'); return; }
+  if (code.length !== 6) { obShowError('Vul een geldige 6-tekens reiscode in.'); return; }
+  obSetLoading(true);
+  try {
+    if (!currentUser) await signInAnonymously(auth);
+    await updateProfile(auth.currentUser, { displayName: name });
+    currentUser = auth.currentUser;
+    const ref = doc(db, 'trips', code);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { obSetLoading(false); obShowError('Deze reiscode bestaat niet.'); return; }
+    localStorage.setItem('tripCode', code);
+    localStorage.setItem('tripRole', 'follower');
+    enterApp(code, 'follower');
+  } catch (err) {
+    obSetLoading(false);
+    obShowError('Kon niet meekijken: ' + err.message);
+  }
+});
+
+// Meldt jezelf aan als volger, zodat Tom/Imke kunnen zien wie er meekijkt.
+// Probeert het na een mislukking automatisch nog eens (bijv. vlak nadat de
+// beveiligingsregels zijn bijgewerkt), en herhaalt zichzelf terwijl de app
+// open blijft — zo hoeft niemand zelf te verversen om alsnog zichtbaar te
+// worden.
+let followerHeartbeat = null;
+function registerAsFollower(code) {
+  const write = () => setDoc(doc(db, 'trips', code, 'followers', currentUser.uid), {
+    uid: currentUser.uid,
+    name: authorName(),
+    joinedAt: new Date().toISOString()
+  });
+  write().catch((err) => {
+    setTimeout(() => write().catch((err2) => {
+      toast('Kon je niet aanmelden als volger: ' + err2.message);
+    }), 4000);
+  });
+
+  clearInterval(followerHeartbeat);
+  followerHeartbeat = setInterval(() => write().catch(() => {}), 5 * 60 * 1000);
+}
+
+async function enterApp(code, role) {
+  obSetLoading(false);
+  currentTripCode = code;
+  currentRole = role;
+  const tripSnap = await getDoc(doc(db, 'trips', code));
+  const tripName = tripSnap.exists() ? tripSnap.data().name : 'Jut en Juul op vakantie';
+
+  document.getElementById('tripTitle').textContent = tripName;
+  document.getElementById('tripSub').textContent = role === 'follower' ? 'je kijkt mee en kunt reageren' : 'jullie reisdagboek';
+  document.getElementById('tripCodeDisplay').textContent = code;
+
+  document.getElementById('fabNieuw').style.display = role === 'follower' ? 'none' : '';
+  document.getElementById('followersPanel').hidden = role === 'follower';
+  document.getElementById('statusUpdatePanel').hidden = role === 'follower';
+  updateWhoButton();
+
+  obScreen.hidden = true;
+  document.getElementById('app').hidden = false;
+  showSkeletons();
+
+  if (role === 'follower') {
+    registerAsFollower(code);
+  } else {
+    subscribeToFollowers(code);
+  }
+
+  subscribeToEntries(code);
+  subscribeToComments(code);
+}
+
+// Toont rustgevende "laden"-placeholders zolang de eerste realtime-sync nog
+// niet binnen is (bijv. bij een trage verbinding), in plaats van een lege pagina.
+function showSkeletons() {
+  const timeline = document.getElementById('timeline');
+  const dashStats = document.getElementById('dashStats');
+  if (timeline) timeline.innerHTML = '<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>';
+  if (dashStats) {
+    document.getElementById('dashEmpty').hidden = true;
+    document.getElementById('dashContent').hidden = false;
+    dashStats.innerHTML = '<div class="skeleton skeleton-stat"></div><div class="skeleton skeleton-stat"></div><div class="skeleton skeleton-stat"></div><div class="skeleton skeleton-stat"></div>';
+  }
+}
+
+function leaveTrip() {
+  if (unsubscribeEntries) unsubscribeEntries();
+  if (unsubscribeComments) unsubscribeComments();
+  if (unsubscribeFollowers) unsubscribeFollowers();
+  clearInterval(followerHeartbeat);
+  localStorage.removeItem('tripCode');
+  localStorage.removeItem('tripRole');
+  signOut(auth).catch(() => {});
+  location.reload();
+}
+document.getElementById('btnLeaveTrip').addEventListener('click', () => {
+  if (confirm('Deze reis verlaten? Je kunt altijd opnieuw inloggen of de code opnieuw invoeren.')) leaveTrip();
+});
+
+// ---------- Auth state ----------
+getRedirectResult(auth).catch((err) => {
+  obShowError('Inloggen mislukt: ' + err.message);
+});
+
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  if (!user) return;
+
+  const savedCode = localStorage.getItem('tripCode');
+  if (savedCode) {
+    // De rol wordt bepaald door hóé je daadwerkelijk bent ingelogd (Google-account
+    // = reiziger, anoniem = volger) — niet door een eerder opgeslagen waarde in
+    // localStorage. Die kan verouderd zijn als dit toestel ooit voor beide rollen
+    // is gebruikt (bijv. tijdens het testen), en zou anders de verkeerde rol
+    // blijven tonen ook nadat iemand echt met Google inlogt.
+    const role = user.isAnonymous ? 'follower' : 'traveler';
+    localStorage.setItem('tripRole', role);
+    enterApp(savedCode, role);
+    return;
+  }
+
+  // Let op: we vertrouwen hier bewust NIET op sessionStorage om te onthouden
+  // "wat de gebruiker aan het doen was" vóór de Google-redirect — op iOS (zeker
+  // in een geïnstalleerde app) gaat die informatie soms verloren tijdens het
+  // heen-en-weer-springen naar Google. In plaats daarvan: iedere ingelogde
+  // Google-gebruiker zonder actieve reis krijgt automatisch de reis-stap te zien.
+  if (!user.isAnonymous) {
+    obShowStep('obStepTraveler');
+  }
+});
+
+// ---------- Firestore: entries + reacties realtime ----------
+let allEntries = [];
+let allComments = [];
+let unsubscribeComments = null;
+
+function subscribeToEntries(code) {
+  if (unsubscribeEntries) unsubscribeEntries();
+  const q = query(collection(db, 'trips', code, 'entries'), orderBy('timestamp'));
+  unsubscribeEntries = onSnapshot(q, (snapshot) => {
+    allEntries = snapshot.docs.map(d => d.data());
+    renderTimeline();
+    renderMap();
+    updateCounts();
+    renderDashboard();
+  }, (err) => {
+    toast('Synchronisatie-fout: ' + err.message);
+  });
+}
+
+function subscribeToComments(code) {
+  if (unsubscribeComments) unsubscribeComments();
+  const q = query(collection(db, 'trips', code, 'comments'), orderBy('createdAt'));
+  unsubscribeComments = onSnapshot(q, (snapshot) => {
+    allComments = snapshot.docs.map(d => d.data());
+    renderTimeline();
+  }, (err) => {
+    toast('Synchronisatie-fout (reacties): ' + err.message);
+  });
+}
+
+let unsubscribeFollowers = null;
+let allFollowers = [];
+function subscribeToFollowers(code) {
+  if (unsubscribeFollowers) unsubscribeFollowers();
+  const q = query(collection(db, 'trips', code, 'followers'), orderBy('joinedAt'));
+  unsubscribeFollowers = onSnapshot(q, (snapshot) => {
+    allFollowers = snapshot.docs.map(d => d.data());
+    renderFollowers();
+  }, (err) => {
+    const wrap = document.getElementById('followersList');
+    if (wrap) wrap.innerHTML = `<p class="panel__hint" style="color:var(--brick);margin:0;">Kon volgers niet laden: ${escapeHtml(err.message)}</p>`;
+  });
+}
+
+function renderFollowers() {
+  const wrap = document.getElementById('followersList');
+  if (!wrap) return;
+  if (allFollowers.length === 0) {
+    wrap.innerHTML = '<p class="panel__hint" style="margin:0;">Nog niemand meegekeken — deel de reiscode hierboven.</p>';
+    return;
+  }
+  wrap.innerHTML = '';
+  allFollowers.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'follower-row';
+    row.innerHTML = `
+      <span class="author-dot" style="background:${authorColor(f.name)}">${escapeHtml(f.name.slice(0, 1).toUpperCase())}</span>
+      <span style="flex:1;">${escapeHtml(f.name)}</span>
+      <button type="button" class="comment__remove" title="Verwijderen">×</button>
+    `;
+    row.querySelector('.comment__remove').addEventListener('click', () => {
+      if (confirm(`"${f.name}" verwijderen uit deze lijst?`)) {
+        deleteDoc(doc(db, 'trips', currentTripCode, 'followers', f.uid)).catch((err) => {
+          toast('Verwijderen mislukt: ' + err.message);
+        });
+      }
+    });
+    wrap.appendChild(row);
+  });
+}
+
+async function saveEntry(entry) {
+  await setDoc(doc(db, 'trips', currentTripCode, 'entries', entry.id), entry);
+}
+async function removeEntry(id) {
+  await deleteDoc(doc(db, 'trips', currentTripCode, 'entries', id));
+}
+async function addComment(day, text, replyTo = null) {
+  const comment = {
+    id: crypto.randomUUID ? crypto.randomUUID() : 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2),
+    day,
+    text: text.trim(),
+    author: authorName(),
+    authorUid: currentUser.uid,
+    replyTo,
+    createdAt: new Date().toISOString()
+  };
+  await setDoc(doc(db, 'trips', currentTripCode, 'comments', comment.id), comment);
+}
+async function removeComment(id) {
+  await deleteDoc(doc(db, 'trips', currentTripCode, 'comments', id));
+}
+
+
+// ============================================================
+// MODAL open/sluiten met vloeiende overgang
+// ============================================================
+function openModal() {
+  const modal = document.getElementById('entryModal');
+  modal.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
+}
+function closeModal() {
+  const modal = document.getElementById('entryModal');
+  modal.classList.remove('is-open');
+  setTimeout(() => { modal.hidden = true; }, 260);
+}
+
+// ============================================================
+// NIEUW MOMENT / WIJZIGEN
+// ============================================================
+let editingId = null;
+let editingAuthor = null;
+let editingCreatedAt = null;
+
+function resetEntryForm() {
+  editingId = null;
+  editingAuthor = null;
+  editingCreatedAt = null;
+  document.getElementById('nieuwHeading').textContent = 'Nieuw moment';
+  document.getElementById('btnSaveEntry').textContent = 'Bewaar dit moment';
+  document.getElementById('entryForm').reset();
+  pendingPhotos = [];
+  pendingLocation = null;
+  pendingLocationName = null;
+  document.getElementById('locateStatus').textContent = '';
+  document.getElementById('addressResults').innerHTML = '';
+  renderPhotoPreview();
+  document.querySelectorAll('.type-chip').forEach(c => c.classList.remove('is-active'));
+  document.querySelector('.type-chip[data-type="plek"]').classList.add('is-active');
+  selectedType = 'plek';
+
+  document.querySelectorAll('.pill-chip').forEach(c => c.classList.remove('is-active'));
+  pendingMealType = null; pendingQuickTag = null; pendingPlaceType = null;
+  pendingStayType = null; pendingTransportMode = null; pendingWeather = null;
+  pendingRating = 0;
+  renderStarPicker();
+  document.getElementById('addPlaceTypeForm').hidden = true;
+  document.getElementById('fHighlight').checked = false;
+  document.getElementById('chkGoedBed').checked = false;
+  document.getElementById('chkUitzicht').checked = false;
+  document.getElementById('chkDouche').checked = false;
+  document.getElementById('chkLawaai').checked = false;
+  document.getElementById('fFrom').value = '';
+  document.getElementById('fTo').value = '';
+
+  updateTypeFields();
+  prefillDateTime();
+}
+
+function setChipActive(rowId, value) {
+  document.querySelectorAll(`#${rowId} .pill-chip`).forEach((c) => {
+    c.classList.toggle('is-active', c.dataset.value === value);
+  });
+}
+
+function editEntry(entry) {
+  editingId = entry.id;
+  editingAuthor = entry.author;
+  editingCreatedAt = entry.createdAt;
+  closeModal();
+
+  const type = normType(entry.type);
+  selectedType = type;
+  document.querySelectorAll('.type-chip').forEach(c => c.classList.toggle('is-active', c.dataset.type === type));
+  document.getElementById('fTitle').value = entry.title;
+  document.getElementById('fNote').value = entry.note || '';
+  document.getElementById('fDate').value = entry.timestamp.slice(0, 10);
+  document.getElementById('fTime').value = entry.timestamp.slice(11, 16);
+
+  pendingPhotos = (entry.photos || []).slice();
+  renderPhotoPreview();
+
+  pendingLocation = entry.lat ? { lat: entry.lat, lng: entry.lng } : null;
+  pendingLocationName = entry.locationName || null;
+  document.getElementById('locateStatus').textContent = pendingLocation
+    ? `✓ ${pendingLocationName || pendingLocation.lat.toFixed(4) + ', ' + pendingLocation.lng.toFixed(4)}`
+    : '';
+  document.getElementById('addressResults').innerHTML = '';
+
+  document.querySelectorAll('.pill-chip').forEach(c => c.classList.remove('is-active'));
+  pendingMealType = entry.mealType || null;
+  pendingQuickTag = entry.quickTag || null;
+  pendingPlaceType = entry.placeType || null;
+  pendingStayType = entry.stayType || null;
+  pendingTransportMode = entry.transportMode || null;
+  pendingWeather = entry.weather || null;
+  if (pendingMealType) setChipActive('mealTypeRow', pendingMealType);
+  if (pendingQuickTag) setChipActive('quickTagRow', pendingQuickTag);
+  if (pendingPlaceType) setChipActive('placeTypeRow', pendingPlaceType);
+  if (pendingStayType) setChipActive('stayTypeRow', pendingStayType);
+  if (pendingTransportMode) setChipActive('transportRow', pendingTransportMode);
+  if (pendingWeather) setChipActive('weatherRow', pendingWeather);
+
+  pendingRating = entry.rating || 0;
+  renderStarPicker();
+  document.getElementById('fHighlight').checked = !!entry.highlight;
+  const checks = entry.checks || {};
+  document.getElementById('chkGoedBed').checked = !!checks.goedBed;
+  document.getElementById('chkUitzicht').checked = !!checks.uitzicht;
+  document.getElementById('chkDouche').checked = !!checks.douche;
+  document.getElementById('chkLawaai').checked = !!checks.lawaai;
+  document.getElementById('fFrom').value = entry.fromPlace || '';
+  document.getElementById('fTo').value = entry.toPlace || '';
+
+  updateTypeFields();
+  document.getElementById('nieuwHeading').textContent = 'Moment wijzigen';
+  document.getElementById('btnSaveEntry').textContent = 'Wijzigingen opslaan';
+  showView('view-nieuw');
+}
+
+// ---------- Reis-knop (rechtsboven) ----------
+const AUTHOR_COLORS = ['#2B6E63', '#B23A2E', '#D6A419', '#5B6EA8'];
+function authorColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AUTHOR_COLORS[Math.abs(hash) % AUTHOR_COLORS.length];
+}
+function updateWhoButton() {
+  const btn = document.getElementById('btnWho');
+  const name = authorName();
+  btn.textContent = name.slice(0, 1).toUpperCase();
+  btn.style.background = authorColor(name);
+  btn.style.borderColor = 'transparent';
+  btn.style.color = '#fff';
+}
+document.getElementById('btnWho').addEventListener('click', () => showView('view-overzicht'));
+
+// ============================================================
+// NAVIGATIE
+// ============================================================
+const tabButtons = document.querySelectorAll('.tabbar__btn');
+const views = document.querySelectorAll('[data-view]');
+function showView(id) {
+  views.forEach(v => v.hidden = v.id !== id);
+  tabButtons.forEach(b => b.classList.toggle('is-active', b.dataset.target === id));
+  window.scrollTo(0, 0);
+  if (id === 'view-kaart') {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      timeMachineActive = false;
+      tmStopPlayback();
+      const panel = document.getElementById('timeMachinePanel');
+      if (panel) panel.hidden = true;
+      document.getElementById('btnToggleTimeMachine').textContent = '🕰️ Reis afspelen';
+      rebuildMap();
+    }));
+  }
+  if (id === 'view-dashboard') {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!dashMap) return;
+      dashMap.invalidateSize();
+      if (dashMapLatLngs.length) dashMap.fitBounds(dashMapLatLngs, { padding: [20, 20] });
+    }));
+  }
+  if (id === 'view-overzicht') renderStats();
+}
+tabButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.target === 'view-nieuw') {
+      if (currentRole === 'follower') { showView('view-dashboard'); return; }
+      resetEntryForm();
+    }
+    showView(btn.dataset.target);
+  });
+});
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('is-visible')));
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => {
+    t.classList.remove('is-visible');
+    setTimeout(() => { t.hidden = true; }, 260);
+  }, 2400);
+}
+
+// Zelfde toast, maar met een actieknop erin (bijv. "deel dit in de groepsapp").
+// Blijft iets langer staan zodat er tijd is om 'm te zien en aan te tikken.
+function toastWithAction(msg, actionLabel, actionFn) {
+  const t = document.getElementById('toast');
+  t.innerHTML = `<span>${escapeHtml(msg)}</span> <button type="button" id="toastActionBtn" class="toast__action">${escapeHtml(actionLabel)}</button>`;
+  t.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('is-visible')));
+  document.getElementById('toastActionBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    actionFn();
+    t.classList.remove('is-visible');
+    setTimeout(() => { t.hidden = true; }, 260);
+  });
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => {
+    t.classList.remove('is-visible');
+    setTimeout(() => { t.hidden = true; }, 260);
+  }, 5000);
+}
+
+// Opent het native deelmenu (WhatsApp, Berichten, mail, ...) met een kant-en-
+// klaar berichtje. Geen aparte WhatsApp-koppeling nodig — de gebruiker kiest
+// zelf de app waarin het bericht terechtkomt.
+async function shareUpdateMessage(text) {
+  try {
+    if (navigator.share) {
+      await navigator.share({ text });
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Bericht gekopieerd — plak het in je appje ✓');
+  } catch (err) {
+    toast('Kon niet delen: ' + err.message);
+  }
+}
+
+// ============================================================
+// ANIMATIE-TOOLKIT (ripple, confetti, tel-op, shake, stagger)
+// ============================================================
+
+// Ripple-effect bij het indrukken van een knop (event delegation, dus werkt
+// ook voor knoppen die pas later worden aangemaakt, zoals in de pop-up).
+document.addEventListener('pointerdown', (e) => {
+  const btn = e.target.closest('.btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height) * 1.6;
+  const span = document.createElement('span');
+  span.className = 'ripple';
+  span.style.width = span.style.height = size + 'px';
+  span.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  span.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  btn.appendChild(span);
+  setTimeout(() => span.remove(), 600);
+});
+
+// Kleine "pop" als iemand een chip, type-keuze of ster selecteert.
+function popEffect(el) {
+  el.classList.remove('is-popping');
+  void el.offsetWidth; // forceer reflow zodat de animatie opnieuw start
+  el.classList.add('is-popping');
+  setTimeout(() => el.classList.remove('is-popping'), 350);
+}
+
+// Shake voor foutmeldingen — trekt de aandacht zonder een dialoog te tonen.
+function shakeElement(el) {
+  el.classList.remove('shake');
+  void el.offsetWidth;
+  el.classList.add('shake');
+}
+
+// Confetti-uitbarsting vanaf een gegeven positie (bijv. een net aangevinkt hokje).
+function burstConfetti(x, y) {
+  const colors = ['#D6A419', '#B23A2E', '#2B6E63', '#F5EFDD'];
+  const count = 18;
+  for (let i = 0; i < count; i++) {
+    const piece = document.createElement('span');
+    piece.className = 'confetti-piece';
+    piece.style.background = colors[i % colors.length];
+    piece.style.left = x + 'px';
+    piece.style.top = y + 'px';
+    document.body.appendChild(piece);
+    const angle = (Math.PI * 2 * i) / count + (Math.random() * 0.5);
+    const distance = 60 + Math.random() * 70;
+    const dx = Math.cos(angle) * distance;
+    const dy = Math.sin(angle) * distance - 40;
+    const rotate = Math.random() * 480 - 240;
+    const anim = piece.animate([
+      { transform: 'translate(0,0) rotate(0deg)', opacity: 1 },
+      { transform: `translate(${dx}px, ${dy}px) rotate(${rotate}deg)`, opacity: 0 }
+    ], { duration: 750 + Math.random() * 300, easing: 'cubic-bezier(0.22,1,0.36,1)' });
+    anim.onfinish = () => piece.remove();
+  }
+}
+
+// Telt een getal soepel op van 0 naar de doelwaarde (zoals uibeats' Number Ticker).
+function animateNumber(el, target) {
+  const duration = 650;
+  const start = performance.now();
+  function tick(now) {
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3); // ease-out-cubic
+    el.textContent = Math.round(eased * target);
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = target;
+  } else {
+    requestAnimationFrame(tick);
+  }
+}
+
+// Zet gestaffelde bounce-in-animaties op een lijst net-gerenderde elementen.
+function staggerIn(elements, baseDelayMs = 40, maxDelayMs = 320) {
+  elements.forEach((el, i) => {
+    el.classList.add('anim-in');
+    el.style.animationDelay = Math.min(i * baseDelayMs, maxDelayMs) + 'ms';
+  });
+}
+
+// ============================================================
+// TYPE PICKER + categorie-specifieke velden
+// ============================================================
+let selectedType = 'plek';
+
+const TYPE_ICON = { plek: '📍', eten: '🍴', slaap: '🛏️', vervoer: '🚗', recap: '📝' };
+const TYPE_LABEL = { plek: 'Plek / Activiteit', eten: 'Eten & Drinken', slaap: 'Slaapplek', vervoer: 'Verplaatsing', recap: 'Dagrecap' };
+const TYPE_COLOR = { plek: '#2B6E63', eten: '#D6A419', slaap: '#B23A2E', vervoer: '#5B6EA8', recap: '#8a6a0a' };
+const LEGACY_TYPE_MAP = { activiteit: 'plek', overnachting: 'slaap' };
+function normType(type) { return LEGACY_TYPE_MAP[type] || type; }
+
+const MEAL_LABEL = { ontbijt: '🥐 Ontbijt', lunch: '🥪 Lunch', diner: '🍽️ Diner', snack: '☕ Snack/Koffie' };
+const TAG_LABEL = { delicatesse: 'Lokale delicatesse', aanrader: 'Aanrader', touristtrap: 'Tourist trap', koffie: 'Aanrader voor koffie' };
+const PLACE_LABEL = { natuur: '🌿 Natuur', cultuur: '🏛️ Cultuur', stad: '🏘️ Stad/Dorp', parel: '💎 Verborgen parel' };
+const STAY_LABEL = { camping: '⛺ Camping/Tent', hotel: '🏨 Hotel/B&B', camper: '🚐 Camper/Bus', overig: '🚂 Nachttrein/Overig' };
+const TRANSPORT_LABEL = { auto: '🚗 Auto', trein: '🚆 Trein', vliegtuig: '✈️ Vliegtuig', boot: '⛴️ Boot', fiets: '🚴 Benenwagen/Fiets' };
+const WEATHER_ICON = { zonnig: '☀️', bewolkt: '⛅', regen: '🌧️', onweer: '⛈️', sneeuw: '❄️', winderig: '💨', mist: '🌫️' };
+const WEATHER_LABEL = { zonnig: 'Zonnig', bewolkt: 'Bewolkt', regen: 'Regen', onweer: 'Onweer', sneeuw: 'Sneeuw', winderig: 'Winderig', mist: 'Mist' };
+
+const TITLE_PLACEHOLDER = {
+  eten: 'Bijv. Trattoria da Luigi, Rome',
+  plek: 'Bijv. Uitzichtpunt Tre Cime',
+  slaap: 'Bijv. Camping Le Pin, Provence',
+  vervoer: 'Bijv. Rit naar Rome',
+  recap: 'Bijv. Recap van zaterdag'
+};
+const NOTE_PLACEHOLDER = {
+  eten: 'Wat heb je gegeten en gedronken?',
+  plek: 'Sfeer, verhalen of praktische tips',
+  slaap: 'Toelichting voor als je er ooit terug wil',
+  vervoer: 'Bijv. "Prachtige bergpas" of "vertraging gehad"',
+  recap: 'Hoe was de dag als geheel?'
+};
+
+function updateTypeFields() {
+  document.querySelectorAll('.type-fields[data-for]').forEach((sec) => {
+    sec.hidden = !sec.dataset.for.split(' ').includes(selectedType);
+  });
+  document.getElementById('titleLabel').textContent = selectedType === 'vervoer' ? 'Naam / omschrijving rit' : (selectedType === 'recap' ? 'Titel' : 'Naam / locatie');
+  document.getElementById('fTitle').placeholder = TITLE_PLACEHOLDER[selectedType];
+  document.getElementById('noteLabel').textContent = selectedType === 'vervoer' ? 'Karakter van de rit' : 'Aantekening';
+  document.getElementById('fNote').placeholder = NOTE_PLACEHOLDER[selectedType];
+  document.getElementById('ratingFieldLabel').textContent = selectedType === 'slaap' ? 'Slaapscore' : 'Beoordeling';
+  // Dagrecap gaat niet over een specifieke plek, dus geen locatieveld nodig
+  document.getElementById('locationField').hidden = selectedType === 'recap';
+}
+
+document.querySelectorAll('.type-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.type-chip').forEach(c => c.classList.remove('is-active'));
+    chip.classList.add('is-active');
+    popEffect(chip);
+    selectedType = chip.dataset.type;
+    updateTypeFields();
+  });
+});
+document.querySelector('.type-chip[data-type="plek"]').classList.add('is-active');
+
+let pendingMealType = null, pendingQuickTag = null, pendingPlaceType = null,
+    pendingStayType = null, pendingTransportMode = null, pendingWeather = null;
+
+document.getElementById('fHighlight').addEventListener('change', (e) => {
+  if (e.target.checked) {
+    const rect = e.target.getBoundingClientRect();
+    burstConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+});
+
+document.querySelectorAll('.type-fields .chip-row, #weatherRow').forEach((row) => {
+  row.addEventListener('click', (e) => {
+    const chip = e.target.closest('.pill-chip');
+    if (!chip || chip.id === 'btnAddPlaceType') return;
+    const wasActive = chip.classList.contains('is-active');
+    row.querySelectorAll('.pill-chip').forEach((c) => c.classList.remove('is-active'));
+    if (!wasActive) { chip.classList.add('is-active'); popEffect(chip); }
+    pendingMealType = document.querySelector('#mealTypeRow .pill-chip.is-active')?.dataset.value || null;
+    pendingQuickTag = document.querySelector('#quickTagRow .pill-chip.is-active')?.dataset.value || null;
+    pendingPlaceType = document.querySelector('#placeTypeRow .pill-chip.is-active')?.dataset.value || null;
+    pendingStayType = document.querySelector('#stayTypeRow .pill-chip.is-active')?.dataset.value || null;
+    pendingTransportMode = document.querySelector('#transportRow .pill-chip.is-active')?.dataset.value || null;
+    pendingWeather = document.querySelector('#weatherRow .pill-chip.is-active')?.dataset.value || null;
+  });
+});
+
+// ---------- Eigen "soort plek" toevoegen ----------
+function loadCustomPlaceTypes() {
+  try { return JSON.parse(localStorage.getItem('customPlaceTypes') || '[]'); } catch { return []; }
+}
+function renderCustomPlaceTypeChips() {
+  const row = document.getElementById('placeTypeRow');
+  const addBtn = document.getElementById('btnAddPlaceType');
+  loadCustomPlaceTypes().forEach((label) => {
+    if (row.querySelector(`.pill-chip[data-value="${CSS.escape(label)}"]`)) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pill-chip';
+    btn.dataset.value = label;
+    btn.textContent = '📌 ' + label;
+    row.insertBefore(btn, addBtn);
+  });
+}
+renderCustomPlaceTypeChips();
+document.getElementById('btnAddPlaceType').addEventListener('click', () => {
+  const form = document.getElementById('addPlaceTypeForm');
+  form.hidden = !form.hidden;
+  if (!form.hidden) document.getElementById('addPlaceTypeInput').focus();
+});
+function confirmAddPlaceType() {
+  const input = document.getElementById('addPlaceTypeInput');
+  const clean = input.value.trim().slice(0, 24);
+  if (!clean) return;
+  const list = loadCustomPlaceTypes();
+  if (!list.includes(clean)) {
+    list.push(clean);
+    localStorage.setItem('customPlaceTypes', JSON.stringify(list));
+  }
+  renderCustomPlaceTypeChips();
+  input.value = '';
+  document.getElementById('addPlaceTypeForm').hidden = true;
+  const newChip = document.querySelector(`#placeTypeRow .pill-chip[data-value="${CSS.escape(clean)}"]`);
+  if (newChip) newChip.click();
+}
+document.getElementById('btnConfirmAddPlaceType').addEventListener('click', confirmAddPlaceType);
+document.getElementById('addPlaceTypeInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); confirmAddPlaceType(); }
+});
+
+let pendingRating = 0;
+function renderStarPicker() {
+  document.querySelectorAll('#ratingPicker .star-btn').forEach((b) => {
+    b.classList.toggle('is-filled', Number(b.dataset.value) <= pendingRating);
+  });
+}
+document.getElementById('ratingPicker').addEventListener('click', (e) => {
+  const btn = e.target.closest('.star-btn');
+  if (!btn) return;
+  const val = Number(btn.dataset.value);
+  pendingRating = (pendingRating === val) ? 0 : val;
+  renderStarPicker();
+  if (pendingRating > 0) popEffect(btn);
+});
+
+function prefillDateTime() {
+  const now = new Date();
+  document.getElementById('fDate').value = now.toISOString().slice(0, 10);
+  document.getElementById('fTime').value = now.toTimeString().slice(0, 5);
+}
+
+// ============================================================
+// LOCATIE (GPS + adres zoeken)
+// ============================================================
+let pendingLocation = null;
+let pendingLocationName = null;
+
+document.getElementById('btnLocate').addEventListener('click', () => {
+  const status = document.getElementById('locateStatus');
+  if (!navigator.geolocation) { status.textContent = 'Niet ondersteund'; return; }
+  status.textContent = 'Bezig met zoeken…';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      pendingLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      pendingLocationName = null;
+      status.textContent = `✓ ${pendingLocation.lat.toFixed(4)}, ${pendingLocation.lng.toFixed(4)}`;
+    },
+    () => { status.textContent = 'Kon locatie niet bepalen'; },
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+
+document.getElementById('btnSearchAddress').addEventListener('click', async () => {
+  const query = document.getElementById('fAddressQuery').value.trim();
+  const results = document.getElementById('addressResults');
+  if (!query) return;
+  results.innerHTML = '<p class="location-status">Zoeken…</p>';
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&addressdetails=1&extratags=1&q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      results.innerHTML = '<p class="location-status">Niets gevonden — probeer een andere zoekterm, eventueel met de plaatsnaam erbij</p>';
+      return;
+    }
+    const isStay = (p) => p.class === 'tourism' || ['hotel','guest_house','hostel','apartment','motel','camp_site'].includes(p.type);
+    data.sort((a, b) => (isStay(b) ? 1 : 0) - (isStay(a) ? 1 : 0));
+    results.innerHTML = '';
+    data.forEach((place) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'address-result';
+      const icon = isStay(place) ? '🏨 ' : '📍 ';
+      btn.textContent = icon + place.display_name;
+      btn.addEventListener('click', () => {
+        pendingLocation = { lat: parseFloat(place.lat), lng: parseFloat(place.lon) };
+        pendingLocationName = place.display_name;
+        document.getElementById('locateStatus').textContent = `✓ ${place.display_name}`;
+        results.innerHTML = '';
+        document.getElementById('fAddressQuery').value = '';
+      });
+      results.appendChild(btn);
+    });
+  } catch (err) {
+    results.innerHTML = '<p class="location-status">Kon niet zoeken — controleer je internetverbinding</p>';
+  }
+});
+
+// ============================================================
+// FOTO'S — camera of bibliotheek (native keuzemenu), max 3, sterk gecomprimeerd
+// zodat een moment ruim binnen de opslaglimiet van één document blijft.
+// ============================================================
+const MAX_PHOTOS = 6;
+let pendingPhotos = [];
+document.getElementById('btnAddPhoto').addEventListener('click', () => {
+  document.getElementById('fPhotos').click();
+});
+document.getElementById('fPhotos').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  for (const file of files) {
+    if (pendingPhotos.length >= MAX_PHOTOS) {
+      toast(`Maximaal ${MAX_PHOTOS} foto's per moment`);
+      break;
+    }
+    const dataUrl = await compressImage(file);
+    pendingPhotos.push(dataUrl);
+  }
+  renderPhotoPreview();
+  e.target.value = '';
+});
+function renderPhotoPreview() {
+  const wrap = document.getElementById('photoPreview');
+  wrap.innerHTML = '';
+  pendingPhotos.forEach((src, i) => {
+    const item = document.createElement('div');
+    item.className = 'photo-preview__item';
+    const kb = Math.round(src.length / 1024);
+    item.innerHTML = `<img src="${src}"><button type="button" class="photo-preview__remove" data-i="${i}">×</button><span class="photo-preview__size">${kb}KB</span>`;
+    wrap.appendChild(item);
+  });
+  wrap.querySelectorAll('.photo-preview__remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      pendingPhotos.splice(Number(btn.dataset.i), 1);
+      renderPhotoPreview();
+    });
+  });
+}
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    img.onload = () => {
+      // Probeer steeds kleiner/harder te comprimeren totdat de foto ruim
+      // binnen budget past — sommige foto's (veel details/contrast, zoals
+      // een wijds uitzicht) blijven met lichte instellingen soms te groot.
+      const targetBytes = 120 * 1024; // streefwaarde per foto (na base64)
+      const attempts = [
+        { w: 900, q: 0.55 },
+        { w: 800, q: 0.45 },
+        { w: 700, q: 0.35 },
+        { w: 600, q: 0.3 },
+        { w: 500, q: 0.25 },
+        { w: 420, q: 0.2 },
+        { w: 340, q: 0.16 },
+        { w: 280, q: 0.12 },
+        { w: 220, q: 0.1 }
+      ];
+      let result = '';
+      for (const a of attempts) {
+        const scale = Math.min(1, a.w / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        result = canvas.toDataURL('image/jpeg', a.q);
+        if (result.length <= targetBytes) break;
+      }
+      resolve(result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ============================================================
+// FORMULIER OPSLAAN
+// ============================================================
+document.getElementById('entryForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (currentRole === 'follower') return;
+
+  const isEdit = editingId !== null;
+  const date = document.getElementById('fDate').value;
+  const time = document.getElementById('fTime').value;
+  const entry = {
+    id: isEdit ? editingId : (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2)),
+    type: selectedType,
+    title: document.getElementById('fTitle').value.trim(),
+    note: document.getElementById('fNote').value.trim(),
+    timestamp: `${date}T${time}:00`,
+    lat: pendingLocation ? pendingLocation.lat : null,
+    lng: pendingLocation ? pendingLocation.lng : null,
+    locationName: pendingLocationName,
+    photos: pendingPhotos.slice(),
+    weather: pendingWeather,
+    author: isEdit ? editingAuthor : authorName(),
+    createdAt: isEdit ? editingCreatedAt : new Date().toISOString()
+  };
+
+  if (selectedType === 'eten') {
+    entry.mealType = pendingMealType;
+    entry.quickTag = pendingQuickTag;
+    entry.rating = pendingRating || null;
+  } else if (selectedType === 'plek') {
+    entry.placeType = pendingPlaceType;
+    entry.highlight = document.getElementById('fHighlight').checked;
+    entry.rating = pendingRating || null;
+  } else if (selectedType === 'slaap') {
+    entry.stayType = pendingStayType;
+    entry.rating = pendingRating || null;
+    entry.checks = {
+      goedBed: document.getElementById('chkGoedBed').checked,
+      uitzicht: document.getElementById('chkUitzicht').checked,
+      douche: document.getElementById('chkDouche').checked,
+      lawaai: document.getElementById('chkLawaai').checked
+    };
+  } else if (selectedType === 'vervoer') {
+    entry.fromPlace = document.getElementById('fFrom').value.trim();
+    entry.toPlace = document.getElementById('fTo').value.trim();
+    entry.transportMode = pendingTransportMode;
+  }
+
+  // Voorkom de technische Firestore-foutmelding: check zelf even of dit moment
+  // (inclusief foto's) binnen de opslaglimiet van 1MB (1.048.576 bytes) per
+  // document past. Marge bewust klein gehouden: bij nieuwe foto's comprimeert
+  // de app al agressief genoeg, dus we willen bestaande (oudere) momenten die
+  // nét onder de harde grens vallen niet onnodig blokkeren bij simpelweg
+  // opnieuw opslaan.
+  const approxSize = new Blob([JSON.stringify(entry)]).size;
+  if (approxSize > 1010 * 1024) {
+    const kb = Math.round(approxSize / 1024);
+    toast(`Te groot om op te slaan (${kb}KB) — verwijder een foto of voeg er één minder toe`);
+    shakeElement(document.getElementById('photoPreview'));
+    return;
+  }
+
+  try {
+    await saveEntry(entry);
+    if (isEdit) {
+      toast('Moment bijgewerkt ✓');
+    } else {
+      const shareText = `📍 Nieuw in ons reisdagboek "${document.getElementById('tripTitle').textContent}": ${entry.title}! Bekijk het hier: ${location.href}`;
+      toastWithAction('Moment bewaard ✓', '📤 Familie laten weten', () => shareUpdateMessage(shareText));
+    }
+    resetEntryForm();
+    showView('view-dashboard');
+  } catch (err) {
+    toast('Opslaan mislukt: ' + err.message);
+  }
+});
+
+// ============================================================
+// TIJDLIJN / POSTKAARTJES
+// ============================================================
+function fmtDayHeading(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function fmtTime(ts) { return ts.slice(11, 16); }
+function fmtStamp(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' }).toUpperCase();
+}
+
+function getDayWeatherIcons(dayEntries) {
+  const seen = [];
+  dayEntries.forEach((e) => {
+    if (e.weather && !seen.includes(e.weather)) seen.push(e.weather);
+  });
+  return seen.map(w => WEATHER_ICON[w] || '').join(' ');
+}
+
+// ---------- Subtiele "landsfeer" op basis van bekende locatienamen ----------
+// Geen aparte kaart-/geodienst nodig: we lezen gewoon het laatste stukje van
+// de al opgeslagen locatienaam (die van Nominatim komt en meestal eindigt op
+// het land), en matchen dat tegen een kleine lijst. Onbekend land? Dan blijft
+// de bestaande vaste stijl gewoon zoals hij is — dit is puur een subtiel extraatje.
+const COUNTRY_THEMES = {
+  'kroatië': { flag: '🇭🇷', accent: '#1E3A5F' }, 'croatia': { flag: '🇭🇷', accent: '#1E3A5F' }, 'hrvatska': { flag: '🇭🇷', accent: '#1E3A5F' },
+  'duitsland': { flag: '🇩🇪', accent: '#3A3A3A' }, 'germany': { flag: '🇩🇪', accent: '#3A3A3A' }, 'deutschland': { flag: '🇩🇪', accent: '#3A3A3A' },
+  'oostenrijk': { flag: '🇦🇹', accent: '#8C1D1D' }, 'austria': { flag: '🇦🇹', accent: '#8C1D1D' }, 'österreich': { flag: '🇦🇹', accent: '#8C1D1D' },
+  'slovenië': { flag: '🇸🇮', accent: '#1E5B8C' }, 'slovenia': { flag: '🇸🇮', accent: '#1E5B8C' }, 'slovenija': { flag: '🇸🇮', accent: '#1E5B8C' },
+  'italië': { flag: '🇮🇹', accent: '#3C7A4E' }, 'italy': { flag: '🇮🇹', accent: '#3C7A4E' }, 'italia': { flag: '🇮🇹', accent: '#3C7A4E' },
+  'frankrijk': { flag: '🇫🇷', accent: '#2E4E8C' }, 'france': { flag: '🇫🇷', accent: '#2E4E8C' },
+  'spanje': { flag: '🇪🇸', accent: '#B33A2E' }, 'spain': { flag: '🇪🇸', accent: '#B33A2E' }, 'españa': { flag: '🇪🇸', accent: '#B33A2E' },
+  'nederland': { flag: '🇳🇱', accent: '#C1440E' }, 'the netherlands': { flag: '🇳🇱', accent: '#C1440E' }, 'netherlands': { flag: '🇳🇱', accent: '#C1440E' },
+  'belgië': { flag: '🇧🇪', accent: '#8C1D1D' }, 'belgium': { flag: '🇧🇪', accent: '#8C1D1D' },
+  'bosnië en herzegovina': { flag: '🇧🇦', accent: '#1E5B8C' }, 'bosnia and herzegovina': { flag: '🇧🇦', accent: '#1E5B8C' },
+  'zwitserland': { flag: '🇨🇭', accent: '#8C1D1D' }, 'switzerland': { flag: '🇨🇭', accent: '#8C1D1D' }, 'schweiz': { flag: '🇨🇭', accent: '#8C1D1D' },
+  'griekenland': { flag: '🇬🇷', accent: '#1E5B8C' }, 'greece': { flag: '🇬🇷', accent: '#1E5B8C' },
+  'portugal': { flag: '🇵🇹', accent: '#3C7A4E' }
+};
+function countryThemeFor(locationName) {
+  if (!locationName) return null;
+  const parts = locationName.split(',').map(s => s.trim().toLowerCase());
+  const countryPart = parts[parts.length - 1];
+  return COUNTRY_THEMES[countryPart] || null;
+}
+
+// Terugval op basis van de coördinaten zelf — nodig voor momenten die met
+// "Gebruik huidige locatie" zijn vastgelegd (die hebben wél lat/lng, maar
+// geen adrestekst om het land uit af te lezen). Simpele, ruime begrenzingen
+// per land; bij een grensgebied kan het dus een keer net verkeerd gokken,
+// maar voor dit subtiele extraatje is dat geen probleem.
+const COUNTRY_BOUNDS = [
+  { code: 'hrvatska', latMin: 42.4, latMax: 46.6, lonMin: 13.4, lonMax: 19.5 },
+  { code: 'slovenija', latMin: 45.4, latMax: 46.9, lonMin: 13.3, lonMax: 16.7 },
+  { code: 'bosnia and herzegovina', latMin: 42.5, latMax: 45.3, lonMin: 15.6, lonMax: 19.7 },
+  { code: 'österreich', latMin: 46.3, latMax: 49.1, lonMin: 9.4, lonMax: 17.3 },
+  { code: 'deutschland', latMin: 47.2, latMax: 55.2, lonMin: 5.8, lonMax: 15.1 },
+  { code: 'italia', latMin: 35.4, latMax: 47.2, lonMin: 6.5, lonMax: 18.6 },
+  { code: 'france', latMin: 41.2, latMax: 51.2, lonMin: -5.2, lonMax: 9.7 },
+  { code: 'españa', latMin: 35.9, latMax: 43.9, lonMin: -9.4, lonMax: 4.4 },
+  { code: 'the netherlands', latMin: 50.6, latMax: 53.7, lonMin: 3.2, lonMax: 7.3 },
+  { code: 'belgium', latMin: 49.4, latMax: 51.6, lonMin: 2.4, lonMax: 6.5 },
+  { code: 'schweiz', latMin: 45.7, latMax: 47.9, lonMin: 5.8, lonMax: 10.6 },
+  { code: 'greece', latMin: 34.7, latMax: 41.9, lonMin: 19.2, lonMax: 29.8 },
+  { code: 'portugal', latMin: 36.7, latMax: 42.3, lonMin: -9.7, lonMax: -6.1 }
+];
+function countryThemeForCoords(lat, lng) {
+  for (const b of COUNTRY_BOUNDS) {
+    if (lat >= b.latMin && lat <= b.latMax && lng >= b.lonMin && lng <= b.lonMax) {
+      return COUNTRY_THEMES[b.code] || null;
+    }
+  }
+  return null;
+}
+function countryThemeForEntry(entry) {
+  const byName = countryThemeFor(entry.locationName);
+  if (byName) return byName;
+  if (entry.lat != null && entry.lng != null) return countryThemeForCoords(entry.lat, entry.lng);
+  return null;
+}
+
+function getDayCountryFlag(dayEntries) {
+  const withLoc = dayEntries.filter(e => e.locationName || e.lat != null);
+  for (let i = withLoc.length - 1; i >= 0; i--) {
+    const theme = countryThemeForEntry(withLoc[i]);
+    if (theme) return theme.flag;
+  }
+  return '';
+}
+function getCurrentCountryTheme() {
+  const withLoc = allEntries.filter(e => e.locationName || e.lat != null).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  for (let i = withLoc.length - 1; i >= 0; i--) {
+    const theme = countryThemeForEntry(withLoc[i]);
+    if (theme) return theme;
+  }
+  return null;
+}
+function applyCurrentCountryAccent() {
+  const theme = getCurrentCountryTheme();
+  document.documentElement.style.setProperty('--country-accent', theme ? theme.accent : '');
+}
+
+function renderTimeline() {
+  const container = document.getElementById('timeline');
+  container.innerHTML = '';
+  const main = document.querySelector('main');
+  main.classList.toggle('is-empty', allEntries.length === 0);
+
+  const groups = {};
+  allEntries.forEach(entry => {
+    const day = entry.timestamp.slice(0, 10);
+    (groups[day] = groups[day] || []).push(entry);
+  });
+
+  Object.keys(groups).sort().reverse().forEach(day => {
+    const heading = document.createElement('div');
+    heading.className = 'day-heading';
+    const weatherIcons = getDayWeatherIcons(groups[day]);
+    const countryFlag = getDayCountryFlag(groups[day]);
+    heading.textContent = fmtDayHeading(day) + (countryFlag ? ' ' + countryFlag : '') + (weatherIcons ? ' ' + weatherIcons : '');
+    container.appendChild(heading);
+    groups[day].forEach(entry => container.appendChild(renderPostcard(entry)));
+    container.appendChild(renderDayComments(day));
+  });
+
+  staggerIn(container.querySelectorAll('.postcard'));
+}
+
+function renderCommentRow(c, day, isReply, replyingToName) {
+  const row = document.createElement('div');
+  row.className = isReply ? 'comment comment--reply' : 'comment';
+  const canRemove = currentRole !== 'follower' || c.authorUid === currentUser.uid;
+  row.innerHTML = `
+    <span class="author-dot" style="background:${authorColor(c.author)}">${escapeHtml(c.author.slice(0, 1).toUpperCase())}</span>
+    <div style="flex:1;">
+      ${replyingToName ? `<span class="comment__replying-to">→ antwoord aan ${escapeHtml(replyingToName)}</span>` : ''}
+      <b>${escapeHtml(c.author)}</b>
+      <p>${escapeHtml(c.text)}</p>
+      <div class="comment__actions">
+        <button type="button" class="comment__reply-btn">Reageer</button>
+        ${canRemove ? `<button type="button" class="comment__remove">Verwijderen</button>` : ''}
+      </div>
+      <form class="comment__reply-form" hidden>
+        <input type="text" placeholder="Antwoord aan ${escapeHtml(c.author)}…" maxlength="300">
+        <button type="submit">➤</button>
+      </form>
+    </div>
+  `;
+  const replyBtn = row.querySelector('.comment__reply-btn');
+  const replyForm = row.querySelector('.comment__reply-form');
+  replyBtn.addEventListener('click', () => {
+    replyForm.hidden = !replyForm.hidden;
+    if (!replyForm.hidden) replyForm.querySelector('input').focus();
+  });
+  replyForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = replyForm.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await addComment(day, text, c.id);
+      input.value = '';
+      replyForm.hidden = true;
+    } catch (err) {
+      toast('Reageren mislukt: ' + err.message);
+    }
+    input.disabled = false;
+  });
+  if (canRemove) {
+    row.querySelector('.comment__remove').addEventListener('click', () => removeComment(c.id));
+  }
+  return row;
+}
+
+function renderDayComments(day) {
+  const wrap = document.createElement('div');
+  wrap.className = 'day-comments';
+  const dayComments = allComments.filter(c => c.day === day);
+  const topLevel = dayComments.filter(c => !c.replyTo);
+  const byId = {};
+  dayComments.forEach(cm => { byId[cm.id] = cm; });
+
+  // Verzamelt alle antwoorden op een reactie, ook antwoorden-op-antwoorden,
+  // maar toont ze allemaal netjes op één inspring-niveau onder de hoofdreactie
+  // (chronologisch), zodat een gesprek nooit "doodloopt".
+  function getAllDescendants(rootId) {
+    const result = [];
+    const queue = [rootId];
+    while (queue.length) {
+      const parentId = queue.shift();
+      dayComments.filter(c => c.replyTo === parentId).forEach((child) => {
+        result.push(child);
+        queue.push(child.id);
+      });
+    }
+    return result.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  const list = document.createElement('div');
+  list.className = 'day-comments__list';
+  if (topLevel.length === 0) {
+    list.innerHTML = '<p class="day-comments__empty">Nog geen reacties op deze dag — wees de eerste!</p>';
+  } else {
+    topLevel.forEach((c) => {
+      list.appendChild(renderCommentRow(c, day, false));
+      getAllDescendants(c.id).forEach((reply) => {
+        const parent = byId[reply.replyTo];
+        const replyingToName = parent && parent.id !== c.id ? parent.author : null;
+        list.appendChild(renderCommentRow(reply, day, true, replyingToName));
+      });
+    });
+  }
+  wrap.appendChild(list);
+
+  const form = document.createElement('form');
+  form.className = 'day-comments__form';
+  form.innerHTML = `<input type="text" placeholder="Reageer op deze dag…" maxlength="300"><button type="submit">➤</button>`;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      await addComment(day, text);
+      input.value = '';
+    } catch (err) {
+      toast('Reageren mislukt: ' + err.message);
+    }
+    input.disabled = false;
+    input.focus();
+  });
+  wrap.appendChild(form);
+
+  return wrap;
+}
+
+function renderBadges(entry) {
+  const type = normType(entry.type);
+  const badges = [];
+  if (entry.rating) badges.push(`<span class="postcard__stars">${'★'.repeat(entry.rating)}${'☆'.repeat(5 - entry.rating)}</span>`);
+  if (entry.weather) badges.push(`<span class="badge">${WEATHER_ICON[entry.weather] || ''} ${WEATHER_LABEL[entry.weather] || entry.weather}</span>`);
+  if (type === 'eten') {
+    if (entry.mealType) badges.push(`<span class="badge">${MEAL_LABEL[entry.mealType] || entry.mealType}</span>`);
+    if (entry.quickTag) badges.push(`<span class="badge">${TAG_LABEL[entry.quickTag] || entry.quickTag}</span>`);
+  } else if (type === 'plek') {
+    if (entry.placeType) badges.push(`<span class="badge">${PLACE_LABEL[entry.placeType] || entry.placeType}</span>`);
+    if (entry.highlight) badges.push(`<span class="badge badge--highlight">🏆 Beste van de reis</span>`);
+  } else if (type === 'slaap') {
+    if (entry.stayType) badges.push(`<span class="badge">${STAY_LABEL[entry.stayType] || entry.stayType}</span>`);
+    const c = entry.checks || {};
+    if (c.goedBed) badges.push('<span class="badge">Goed bed</span>');
+    if (c.uitzicht) badges.push('<span class="badge">Mooi uitzicht</span>');
+    if (c.douche) badges.push('<span class="badge">Lekkere douche</span>');
+    if (c.lawaai) badges.push('<span class="badge">Lawaai/rumoerig</span>');
+  } else if (type === 'vervoer') {
+    if (entry.fromPlace || entry.toPlace) badges.push(`<span class="badge">${escapeHtml(entry.fromPlace || '?')} → ${escapeHtml(entry.toPlace || '?')}</span>`);
+    if (entry.transportMode) badges.push(`<span class="badge">${TRANSPORT_LABEL[entry.transportMode] || entry.transportMode}</span>`);
+  }
+  return badges.length ? `<div class="postcard__badges">${badges.join('')}</div>` : '';
+}
+
+function renderPostcard(entry) {
+  const el = document.createElement('article');
+  el.className = 'postcard';
+  el.dataset.id = entry.id;
+  const color = authorColor(entry.author);
+  const initial = entry.author.slice(0, 1).toUpperCase();
+  const type = normType(entry.type);
+  el.innerHTML = `
+    <div class="postcard__tape"></div>
+    <div class="postcard__top">
+      <span class="postcard__type">${TYPE_ICON[type] || '📍'}</span>
+      <h3 class="postcard__title">${escapeHtml(entry.title)}</h3>
+      <span class="postcard__stamp">${fmtStamp(entry.timestamp)}</span>
+    </div>
+    ${entry.note ? `<p class="postcard__note">${escapeHtml(entry.note)}</p>` : ''}
+    ${renderBadges(entry)}
+    ${entry.photos && entry.photos.length ? `<div class="postcard__photos">${entry.photos.map(p => `<img src="${p}">`).join('')}</div>` : ''}
+    <div class="postcard__meta">
+      <span class="author-dot" style="background:${color}">${initial}</span>
+      <span>${entry.author} · ${fmtTime(entry.timestamp)}</span>
+      ${entry.lat ? `<span>· 📍 ${entry.locationName ? escapeHtml(entry.locationName.split(',').slice(0,2).join(',')) : 'vastgelegd'}</span>` : ''}
+    </div>
+  `;
+  el.addEventListener('click', () => openEntryModal(entry));
+  return el;
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// ---------- Klikbare statistieken → gefilterde lijst / foto's ----------
+// ---------- Fotoalbum ----------
+function getAllPhotosWithMeta() {
+  const list = [];
+  allEntries.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp)).forEach((entry) => {
+    (entry.photos || []).forEach((src) => {
+      list.push({ src, entry, day: entry.timestamp.slice(0, 10) });
+    });
+  });
+  return list;
+}
+
+function openAlbum() {
+  renderAlbum();
+  showView('view-album');
+}
+document.getElementById('btnOpenAlbum').addEventListener('click', openAlbum);
+document.getElementById('btnAlbumBack').addEventListener('click', () => showView('view-dashboard'));
+
+// ---------- Reisdagboek: automatisch samengesteld uit bestaande data ----------
+function openDiary() {
+  renderDiary();
+  showView('view-diary');
+}
+document.getElementById('btnOpenDiary').addEventListener('click', openDiary);
+document.getElementById('btnDiaryBack').addEventListener('click', () => showView('view-dashboard'));
+document.getElementById('btnPrintDiary').addEventListener('click', () => window.print());
+
+function renderDiary() {
+  const wrap = document.getElementById('diaryContent');
+  if (!allEntries.length) {
+    wrap.innerHTML = `
+      <div class="empty-state-standalone">
+        <p class="empty-state__stamp">leeg</p>
+        <p>Nog geen momenten vastgelegd — zodra de reis op gang komt, verschijnt hier automatisch het verhaal.</p>
+      </div>`;
+    return;
+  }
+
+  const groups = {};
+  allEntries.forEach((e) => {
+    const day = e.timestamp.slice(0, 10);
+    (groups[day] = groups[day] || []).push(e);
+  });
+  const days = Object.keys(groups).sort();
+
+  wrap.innerHTML = '';
+
+  const cover = document.createElement('div');
+  cover.className = 'diary-cover';
+  cover.innerHTML = `
+    <p class="diary-cover__eyebrow">Het reisdagboek van</p>
+    <h1 class="diary-cover__title">${escapeHtml(document.getElementById('tripTitle').textContent)}</h1>
+    <p class="diary-cover__dates">${fmtDayHeading(days[0])} — ${fmtDayHeading(days[days.length - 1])}</p>
+  `;
+  wrap.appendChild(cover);
+
+  days.forEach((day, i) => {
+    const dayEntries = groups[day].slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    wrap.appendChild(renderDiaryChapter(day, dayEntries, i + 1));
+  });
+}
+
+function renderDiaryChapter(day, dayEntries, dayNumber) {
+  const chapter = document.createElement('section');
+  chapter.className = 'diary-chapter';
+
+  // Titel van het hoofdstuk: een verplaatsing geeft de mooiste "Van → Naar",
+  // anders pakken we de locatienaam van het eerste moment met een plek.
+  const vervoer = dayEntries.find(e => normType(e.type) === 'vervoer' && (e.fromPlace || e.toPlace));
+  let subtitle = '';
+  if (vervoer) {
+    subtitle = `${vervoer.fromPlace || '?'} → ${vervoer.toPlace || '?'}`;
+  } else {
+    const withLoc = dayEntries.find(e => e.locationName);
+    if (withLoc) subtitle = withLoc.locationName.split(',').slice(0, 2).join(',');
+  }
+
+  const heading = document.createElement('div');
+  heading.className = 'diary-chapter__heading';
+  const weatherIcons = getDayWeatherIcons(dayEntries);
+  const countryFlag = getDayCountryFlag(dayEntries);
+  heading.innerHTML = `
+    <p class="diary-chapter__daynum">Dag ${dayNumber}${countryFlag ? ' ' + countryFlag : ''}${weatherIcons ? ' · ' + weatherIcons : ''}</p>
+    <h2 class="diary-chapter__title">${fmtDayHeading(day)}${subtitle ? ' — ' + escapeHtml(subtitle) : ''}</h2>
+  `;
+  chapter.appendChild(heading);
+
+  // Een eventuele Dagrecap opent het hoofdstuk als persoonlijk verhaal
+  const recap = dayEntries.find(e => normType(e.type) === 'recap');
+  if (recap) chapter.appendChild(renderDiaryRecapBlock(recap));
+
+  dayEntries
+    .filter(e => normType(e.type) !== 'recap')
+    .forEach((entry) => chapter.appendChild(renderDiaryMoment(entry)));
+
+  const summary = renderDiaryDaySummary(dayEntries);
+  if (summary) chapter.appendChild(summary);
+
+  return chapter;
+}
+
+function renderDiaryPhotos(photos) {
+  if (!photos || !photos.length) return '';
+  const cls = photos.length === 1 ? 'diary-photos diary-photos--single' : 'diary-photos';
+  return `<div class="${cls}">${photos.map(p => `<img src="${p}">`).join('')}</div>`;
+}
+
+function renderDiaryRecapBlock(entry) {
+  const el = document.createElement('div');
+  el.className = 'diary-recap';
+  el.innerHTML = `
+    <p class="diary-recap__text">${escapeHtml(entry.note || entry.title)}</p>
+    ${renderDiaryPhotos(entry.photos)}
+  `;
+  return el;
+}
+
+function renderDiaryMoment(entry) {
+  const el = document.createElement('div');
+  el.className = 'diary-moment';
+  const type = normType(entry.type);
+
+  let metaLine = '';
+  if (type === 'eten' && entry.mealType) metaLine = MEAL_LABEL[entry.mealType] || '';
+  else if (type === 'plek' && entry.placeType) metaLine = PLACE_LABEL[entry.placeType] || entry.placeType;
+  else if (type === 'slaap' && entry.stayType) metaLine = STAY_LABEL[entry.stayType] || entry.stayType;
+  else if (type === 'vervoer' && entry.transportMode) metaLine = TRANSPORT_LABEL[entry.transportMode] || '';
+
+  const ratingLine = entry.rating ? '★'.repeat(entry.rating) + '☆'.repeat(5 - entry.rating) : '';
+  const highlightBadge = entry.highlight ? '<span class="diary-moment__highlight">⭐ Hoogtepunt van de dag</span>' : '';
+
+  let titleLine = entry.title;
+  if (type === 'vervoer' && (entry.fromPlace || entry.toPlace)) {
+    titleLine = `${entry.fromPlace || '?'} → ${entry.toPlace || '?'}`;
+  }
+
+  el.innerHTML = `
+    <div class="diary-moment__meta">
+      <span class="diary-moment__time">${fmtTime(entry.timestamp)}</span>
+      <span class="diary-moment__icon">${TYPE_ICON[type]}</span>
+      ${metaLine ? `<span class="diary-moment__tag">${escapeHtml(metaLine)}</span>` : ''}
+      ${highlightBadge}
+    </div>
+    <h3 class="diary-moment__title">${escapeHtml(titleLine)}</h3>
+    ${entry.locationName ? `<p class="diary-moment__location">📍 ${escapeHtml(entry.locationName)}</p>` : ''}
+    ${entry.note ? `<p class="diary-moment__note">${escapeHtml(entry.note)}</p>` : ''}
+    ${ratingLine ? `<p class="diary-moment__rating">${ratingLine}</p>` : ''}
+    ${renderDiaryPhotos(entry.photos)}
+  `;
+  return el;
+}
+
+function renderDiaryDaySummary(dayEntries) {
+  const withLoc = dayEntries.filter(e => e.lat).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  let km = 0;
+  for (let i = 1; i < withLoc.length; i++) km += haversineKm(withLoc[i - 1].lat, withLoc[i - 1].lng, withLoc[i].lat, withLoc[i].lng);
+  const placesCount = dayEntries.filter(e => normType(e.type) === 'plek').length;
+  const photosCount = dayEntries.reduce((n, e) => n + (e.photos ? e.photos.length : 0), 0);
+  const highlightsCount = dayEntries.filter(e => e.highlight || (e.rating && e.rating >= 4)).length;
+
+  const parts = [];
+  if (km > 0.5) parts.push(`🚗 ${Math.round(km)} km`);
+  if (placesCount) parts.push(`📍 ${placesCount} locatie${placesCount === 1 ? '' : 's'}`);
+  if (photosCount) parts.push(`📸 ${photosCount} foto's`);
+  if (highlightsCount) parts.push(`⭐ ${highlightsCount} hoogtepunt${highlightsCount === 1 ? '' : 'en'}`);
+  if (!parts.length) return null;
+
+  const el = document.createElement('div');
+  el.className = 'diary-day-summary';
+  el.innerHTML = parts.map(p => `<span>${p}</span>`).join('');
+  return el;
+}
+
+function renderAlbum() {
+  const wrap = document.getElementById('albumContent');
+  const photos = getAllPhotosWithMeta();
+  if (!photos.length) {
+    wrap.innerHTML = `
+      <div class="empty-state-standalone">
+        <p class="empty-state__stamp">leeg</p>
+        <p>Nog geen foto's toegevoegd. Zodra je een moment met een foto vastlegt, verschijnt die hier vanzelf.</p>
+      </div>`;
+    return;
+  }
+  const groups = {};
+  photos.forEach((p, i) => { p.index = i; (groups[p.day] = groups[p.day] || []).push(p); });
+  wrap.innerHTML = '';
+  Object.keys(groups).sort().reverse().forEach((day) => {
+    const heading = document.createElement('div');
+    heading.className = 'day-heading';
+    const countryFlag = getDayCountryFlag(groups[day].map(p => p.entry));
+    heading.textContent = fmtDayHeading(day) + (countryFlag ? ' ' + countryFlag : '');
+    wrap.appendChild(heading);
+    const grid = document.createElement('div');
+    grid.className = 'photo-grid';
+    groups[day].forEach((p) => {
+      const img = document.createElement('img');
+      img.src = p.src;
+      img.className = 'photo-grid__img';
+      img.loading = 'lazy';
+      img.addEventListener('click', () => openPhotoViewer(p.index));
+      grid.appendChild(img);
+    });
+    wrap.appendChild(grid);
+  });
+}
+
+// ---------- Fullscreen foto-viewer (swipebaar) ----------
+let photoViewerList = [];
+let photoViewerIndex = 0;
+
+function openPhotoViewer(index) {
+  photoViewerList = getAllPhotosWithMeta();
+  photoViewerIndex = index;
+  renderPhotoViewer();
+  document.getElementById('photoViewer').hidden = false;
+}
+function renderPhotoViewer() {
+  const p = photoViewerList[photoViewerIndex];
+  if (!p) return;
+  document.getElementById('photoViewerImg').src = p.src;
+  const type = normType(p.entry.type);
+  const locText = p.entry.locationName ? p.entry.locationName.split(',').slice(0, 2).join(',') : '';
+  document.getElementById('photoViewerCaption').innerHTML = `
+    <b>${TYPE_ICON[type]} ${escapeHtml(p.entry.title)}</b><br>
+    ${fmtDayHeading(p.day)} · ${fmtTime(p.entry.timestamp)}${locText ? ' · 📍 ' + escapeHtml(locText) : ''}
+  `;
+}
+function closePhotoViewer() { document.getElementById('photoViewer').hidden = true; }
+document.getElementById('btnClosePhotoViewer').addEventListener('click', closePhotoViewer);
+document.getElementById('btnPhotoPrev').addEventListener('click', () => {
+  if (!photoViewerList.length) return;
+  photoViewerIndex = (photoViewerIndex - 1 + photoViewerList.length) % photoViewerList.length;
+  renderPhotoViewer();
+});
+document.getElementById('btnPhotoNext').addEventListener('click', () => {
+  if (!photoViewerList.length) return;
+  photoViewerIndex = (photoViewerIndex + 1) % photoViewerList.length;
+  renderPhotoViewer();
+});
+document.getElementById('btnPhotoViewerMoment').addEventListener('click', () => {
+  const p = photoViewerList[photoViewerIndex];
+  if (!p) return;
+  closePhotoViewer();
+  setTimeout(() => openEntryModal(p.entry), 60);
+});
+(function setupPhotoViewerSwipe() {
+  const viewer = document.getElementById('photoViewer');
+  let startX = 0;
+  viewer.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; }, { passive: true });
+  viewer.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dx) > 50) {
+      document.getElementById(dx > 0 ? 'btnPhotoPrev' : 'btnPhotoNext').click();
+    }
+  }, { passive: true });
+})();
+
+function openFilteredList(kind) {
+  const modal = document.getElementById('entryModal');
+  const cardEl = document.getElementById('entryModalCard');
+  cardEl.innerHTML = '';
+
+  const heading = document.createElement('h3');
+  heading.style.cssText = 'font-family:var(--font-display);margin:0 0 14px;';
+  const body = document.createElement('div');
+
+  if (kind === 'photos') {
+    heading.textContent = "📷 Alle foto's";
+    const photos = [];
+    allEntries.forEach(e => (e.photos || []).forEach(p => photos.push(p)));
+    if (photos.length) {
+      body.className = 'photo-grid';
+      photos.forEach(src => {
+        const img = document.createElement('img');
+        img.src = src;
+        img.className = 'photo-grid__img';
+        body.appendChild(img);
+      });
+    } else {
+      body.innerHTML = '<p class="day-comments__empty">Nog geen foto\'s toegevoegd.</p>';
+    }
+  } else if (kind === 'days') {
+    heading.textContent = '📅 Dagen vastgelegd';
+    const days = [...new Set(allEntries.map(e => e.timestamp.slice(0, 10)))].sort();
+    if (days.length) {
+      body.className = 'filtered-days';
+      days.forEach(d => {
+        const row = document.createElement('div');
+        row.className = 'filtered-day';
+        row.textContent = fmtDayHeading(d);
+        body.appendChild(row);
+      });
+    } else {
+      body.innerHTML = '<p class="day-comments__empty">Nog geen dagen vastgelegd.</p>';
+    }
+  } else {
+    const labelMap = { plek: '📍 Plekken bezocht', eten: '🍴 Maaltijden', slaap: '🛏️ Nachtjes geslapen', highlights: '🏆 Beste van de reis', all: 'Alle momenten' };
+    heading.textContent = labelMap[kind] || kind;
+    const items = kind === 'highlights' ? allEntries.filter(e => e.highlight)
+      : kind === 'all' ? allEntries.slice()
+      : allEntries.filter(e => normType(e.type) === kind);
+    if (items.length) {
+      body.className = 'timeline';
+      items.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp)).forEach(entry => {
+        body.appendChild(renderPostcard(entry)); // renderPostcard's eigen klik opent de detailweergave
+      });
+    } else {
+      body.innerHTML = '<p class="day-comments__empty">Nog niets in deze categorie.</p>';
+    }
+  }
+
+  cardEl.appendChild(heading);
+  cardEl.appendChild(body);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'modal__close';
+  closeBtn.textContent = 'Sluiten';
+  closeBtn.addEventListener('click', () => closeModal());
+  cardEl.appendChild(closeBtn);
+
+  modal.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
+}
+['statsGrid', 'dashStats'].forEach((id) => {
+  document.getElementById(id).addEventListener('click', (e) => {
+    const card = e.target.closest('.stat-card');
+    if (!card || !card.dataset.filter) return;
+    if (card.dataset.filter === 'photos') { openAlbum(); return; }
+    try {
+      openFilteredList(card.dataset.filter);
+    } catch (err) {
+      toast('Kon lijst niet openen: ' + err.message);
+    }
+  });
+});
+
+function openEntryModal(entry) {
+  const modal = document.getElementById('entryModal');
+  const card = document.getElementById('entryModalCard');
+  const type = normType(entry.type);
+  const canEdit = currentRole !== 'follower';
+  card.innerHTML = `
+    <h3 style="font-family:var(--font-display);margin:0 0 4px;">${TYPE_ICON[type]} ${escapeHtml(entry.title)}</h3>
+    <p style="font-family:var(--font-mono);font-size:11px;color:#7c8580;margin:0 0 12px;">
+      ${TYPE_LABEL[type]} · ${entry.author} · ${new Date(entry.timestamp).toLocaleString('nl-NL')}
+    </p>
+    ${renderBadges(entry)}
+    ${type === 'vervoer' && (entry.fromPlace || entry.toPlace) ? `<p style="font-size:13px;margin:8px 0 0;">${escapeHtml(entry.fromPlace || '?')} → ${escapeHtml(entry.toPlace || '?')}</p>` : ''}
+    ${entry.note ? `<p style="line-height:1.6;">${escapeHtml(entry.note)}</p>` : ''}
+    ${(entry.photos || []).map(p => `<img src="${p}">`).join('')}
+    ${entry.lat ? `<p style="font-size:12px;color:#7c8580;">📍 ${entry.locationName ? escapeHtml(entry.locationName) : entry.lat.toFixed(5) + ', ' + entry.lng.toFixed(5)}</p>` : ''}
+    ${canEdit ? `<button class="btn btn--primary btn--wide" id="btnEditEntry">✏️ Wijzigen</button>
+    <button class="btn btn--ghost btn--wide" id="btnDeleteEntry">🗑️ Verwijderen</button>` : ''}
+    <button class="modal__close" id="btnCloseModal">Sluiten</button>
+  `;
+  modal.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.add('is-open')));
+  document.getElementById('btnCloseModal').onclick = () => { closeModal(); };
+  if (canEdit) {
+    document.getElementById('btnEditEntry').onclick = () => { editEntry(entry); };
+    document.getElementById('btnDeleteEntry').onclick = async () => {
+      if (confirm('Dit moment verwijderen?')) {
+        await removeEntry(entry.id);
+        closeModal();
+      }
+    };
+  }
+}
+document.getElementById('entryModal').addEventListener('click', (e) => {
+  if (e.target.id === 'entryModal') closeModal();
+});
+
+function updateCounts() {
+  document.getElementById('countPill').textContent = `${allEntries.length} moment${allEntries.length === 1 ? '' : 'en'}`;
+  document.getElementById('countPillDash').textContent = `${allEntries.length} moment${allEntries.length === 1 ? '' : 'en'}`;
+  const withLoc = allEntries.filter(e => e.lat);
+  document.getElementById('countPillMap').textContent = `${withLoc.length} pin${withLoc.length === 1 ? '' : 's'}`;
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+// ---------- Hulpfuncties: dagnummer, laatste locatie, afstand ----------
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function computeDayNumber() {
+  const allDays = [...new Set(allEntries.map(e => e.timestamp.slice(0, 10)))].sort();
+  if (!allDays.length) return null;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  return Math.max(1, Math.round((new Date(todayStr) - new Date(allDays[0])) / 86400000) + 1);
+}
+function getLastKnownLocationText() {
+  const withLoc = allEntries.filter(e => e.lat).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  if (!withLoc.length) return null;
+  const last = withLoc[withLoc.length - 1];
+  return last.locationName ? last.locationName.split(',').slice(0, 2).join(',') : `${last.lat.toFixed(2)}, ${last.lng.toFixed(2)}`;
+}
+
+// ---------- Familie-modus: vriendelijke koptekst voor volgers ----------
+function renderFamilyHeader() {
+  const wrap = document.getElementById('familyHeader');
+  if (!wrap) return;
+  if (currentRole !== 'follower') { wrap.hidden = true; return; }
+  wrap.hidden = false;
+
+  const travelers = [...new Set(allEntries.map(e => e.author))];
+  const travelerNames = travelers.length ? travelers.join(' & ') : 'De reizigers';
+  const dayNumber = computeDayNumber();
+
+  wrap.innerHTML = `
+    <div class="family-header">
+      <p class="family-header__greeting">👋 ${escapeHtml(travelerNames)} zijn onderweg</p>
+      <div class="family-header__meta">
+        ${dayNumber ? `<span>🗓️ Dag ${dayNumber}</span>` : ''}
+        <span id="familyLastUpdate"></span>
+      </div>
+      <div class="family-header__links">
+        <button type="button" class="btn" id="btnFamilyRoute">🗺️ Route</button>
+        <button type="button" class="btn" id="btnFamilyAlbum">📷 Album</button>
+        <button type="button" class="btn" id="btnFamilyTijdlijn">🗒️ Eerdere dagen</button>
+      </div>
+    </div>
+  `;
+  updateFamilyLastUpdate();
+  document.getElementById('btnFamilyRoute').addEventListener('click', () => showView('view-kaart'));
+  document.getElementById('btnFamilyAlbum').addEventListener('click', () => openAlbum());
+  document.getElementById('btnFamilyTijdlijn').addEventListener('click', () => showView('view-tijdlijn'));
+}
+function updateFamilyLastUpdate() {
+  const el = document.getElementById('familyLastUpdate');
+  if (!el || !allEntries.length) return;
+  const last = allEntries[allEntries.length - 1];
+  const mins = Math.max(0, Math.round((Date.now() - new Date(last.createdAt || last.timestamp)) / 60000));
+  let text;
+  if (mins < 1) text = 'zojuist';
+  else if (mins < 60) text = `${mins} minuten geleden`;
+  else if (mins < 60 * 24) text = `${Math.round(mins / 60)} uur geleden`;
+  else text = `${Math.round(mins / 60 / 24)} dagen geleden`;
+  el.textContent = `🕐 Laatste update: ${text}`;
+}
+// Ververst alleen de "X geleden"-tekst — geen extra Firestore-verzoeken nodig,
+// de data zelf komt al realtime binnen via de bestaande listeners.
+setInterval(updateFamilyLastUpdate, 60000);
+
+// ---------- "Vandaag"-sectie (dashboard, voor iedereen) ----------
+function renderTodaySection() {
+  const container = document.getElementById('todaySection');
+  if (!container) return;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todaysEntries = allEntries.filter(e => e.timestamp.slice(0, 10) === todayStr);
+  const dayNumber = computeDayNumber();
+
+  if (todaysEntries.length === 0) {
+    container.innerHTML = `
+      <div class="today-card today-card--empty">
+        <p class="today-card__eyebrow">☀️ Vandaag${dayNumber ? ' — Dag ' + dayNumber : ''}</p>
+        <p class="today-card__empty-msg">Vandaag nog geen updates — we zijn waarschijnlijk nog onderweg 😎</p>
+      </div>
+    `;
+    return;
+  }
+
+  const withLoc = todaysEntries.filter(e => e.lat).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const currentLocation = withLoc.length ? (withLoc[withLoc.length - 1].locationName ? withLoc[withLoc.length - 1].locationName.split(',').slice(0, 2).join(',') : null) : null;
+
+  let distanceKm = 0;
+  for (let i = 1; i < withLoc.length; i++) {
+    distanceKm += haversineKm(withLoc[i - 1].lat, withLoc[i - 1].lng, withLoc[i].lat, withLoc[i].lng);
+  }
+
+  const placesCount = todaysEntries.filter(e => normType(e.type) === 'plek').length;
+  const photosCount = todaysEntries.reduce((n, e) => n + (e.photos ? e.photos.length : 0), 0);
+  const highlight = todaysEntries.slice().sort((a, b) => (b.rating || 0) - (a.rating || 0))[0];
+  const weatherIcons = getDayWeatherIcons(todaysEntries);
+  const countryFlag = getDayCountryFlag(todaysEntries);
+
+  container.innerHTML = `
+    <div class="today-card">
+      <p class="today-card__eyebrow">☀️ Vandaag${dayNumber ? ' — Dag ' + dayNumber : ''}${countryFlag ? ' ' + countryFlag : ''}${weatherIcons ? ' ' + weatherIcons : ''}</p>
+      <div class="today-card__stats">
+        ${currentLocation ? `<div class="today-stat">📍 <span>${escapeHtml(currentLocation)}</span></div>` : ''}
+        ${distanceKm > 0.5 ? `<div class="today-stat">🚗 <span>${Math.round(distanceKm)} km vandaag</span></div>` : ''}
+        <div class="today-stat">📍 <span>${placesCount} plek${placesCount === 1 ? '' : 'ken'} bezocht</span></div>
+        ${photosCount ? `<div class="today-stat">📸 <span>${photosCount} foto's</span></div>` : ''}
+        ${highlight && highlight.rating ? `<div class="today-stat">⭐ <span>${escapeHtml(highlight.title)}</span></div>` : ''}
+      </div>
+    </div>
+  `;
+
+  const list = document.createElement('div');
+  list.className = 'timeline';
+  todaysEntries.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp)).forEach(entry => list.appendChild(renderPostcard(entry)));
+  container.appendChild(list);
+  staggerIn(list.querySelectorAll('.postcard'), 60);
+}
+
+// Duidelijke, uitnodigende plek om op de dag van vandaag te reageren, direct
+// vanaf het Dashboard — hergebruikt dezelfde reactie-component als de
+// Tijdlijn, alleen met een opvallender kop eromheen zodat familie meteen
+// ziet dat ze hier iets kunnen achterlaten.
+function renderTodayComments() {
+  const container = document.getElementById('todayCommentsSection');
+  if (!container) return;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todaysEntries = allEntries.filter(e => e.timestamp.slice(0, 10) === todayStr);
+  container.innerHTML = '';
+  if (!todaysEntries.length) return; // nog niets om op te reageren
+
+  const heading = document.createElement('div');
+  heading.className = 'today-comments-cta';
+  heading.innerHTML = `
+    <p class="today-comments-cta__title">💬 Praat mee over vandaag!</p>
+    <p class="today-comments-cta__hint">Laat een berichtje achter — leuk voor Tom en Imke om te lezen.</p>
+  `;
+  container.appendChild(heading);
+  container.appendChild(renderDayComments(todayStr));
+}
+
+function renderDashboard() {
+  renderFamilyHeader();
+  applyCurrentCountryAccent();
+
+  const empty = document.getElementById('dashEmpty');
+  const content = document.getElementById('dashContent');
+
+  if (allEntries.length === 0) {
+    empty.hidden = false;
+    content.hidden = true;
+    return;
+  }
+  empty.hidden = true;
+  content.hidden = false;
+
+  renderTodaySection();
+  renderTodayComments();
+
+  const grid = document.getElementById('dashStats');
+  const plekken = allEntries.filter(e => normType(e.type) === 'plek').length;
+  const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
+  const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
+  grid.innerHTML = `
+    <div class="stat-card" data-filter="plek"><b>0</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card" data-filter="eten"><b>0</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card" data-filter="slaap"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card" data-filter="all"><b>0</b><span>Momenten totaal</span></div>
+  `;
+  const dashVals = [plekken, maaltijden, nachtjes, allEntries.length];
+  grid.querySelectorAll('.stat-card b').forEach((b, i) => animateNumber(b, dashVals[i]));
+  staggerIn(grid.querySelectorAll('.stat-card'), 60);
+
+  const now = new Date();
+  const future = allEntries
+    .filter(e => new Date(e.timestamp) > now)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const wrap = document.getElementById('nextStopWrap');
+  if (future.length) {
+    const next = future[0];
+    const nextType = normType(next.type);
+    const daysUntil = Math.ceil((new Date(next.timestamp) - now) / (1000 * 60 * 60 * 24));
+    wrap.innerHTML = `
+      <div class="next-stop-card">
+        <p class="next-stop-card__eyebrow">Volgende halte</p>
+        <p class="next-stop-card__title">${TYPE_ICON[nextType]} ${escapeHtml(next.title)}</p>
+        <p class="next-stop-card__meta">${next.locationName ? escapeHtml(next.locationName.split(',').slice(0, 2).join(',')) : fmtDayHeading(next.timestamp.slice(0, 10))}</p>
+        <p class="next-stop-card__count">over ${daysUntil} dag${daysUntil === 1 ? '' : 'en'}</p>
+      </div>`;
+  } else {
+    wrap.innerHTML = '';
+  }
+
+  const recentWrap = document.getElementById('dashRecent');
+  recentWrap.innerHTML = '';
+  allEntries.slice(-3).reverse().forEach(entry => recentWrap.appendChild(renderPostcard(entry)));
+  staggerIn(recentWrap.querySelectorAll('.postcard'), 70);
+
+  renderDashMap();
+}
+
+let dashMap = null, dashMapLayer = null, dashMapLatLngs = [];
+function renderDashMap() {
+  const withLoc = allEntries.filter(e => e.lat);
+  if (!withLoc.length) {
+    document.getElementById('dashMap').closest('.dash-map-wrap').style.display = 'none';
+    return;
+  }
+  document.getElementById('dashMap').closest('.dash-map-wrap').style.display = '';
+
+  const dashMapEl = document.getElementById('dashMap');
+  dashMapEl.style.isolation = 'isolate';
+  dashMapEl.style.position = 'relative';
+  dashMapEl.style.overflow = 'hidden';
+
+  if (!dashMap) {
+    dashMap = L.map('dashMap', {
+      zoomControl: false, dragging: false, scrollWheelZoom: false,
+      doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false
+    }).setView([52.1, 5.3], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap', maxZoom: 19
+    }).addTo(dashMap);
+    dashMapLayer = L.layerGroup().addTo(dashMap);
+  }
+  dashMapLayer.clearLayers();
+  dashMapLatLngs = [];
+  withLoc.forEach((entry, i) => {
+    const type = normType(entry.type);
+    const icon = L.divIcon({
+      className: '', html: `<div class="map-pin-num" style="background:${TYPE_COLOR[type] || 'var(--jade)'}">${i + 1}</div>`,
+      iconSize: [22, 22], iconAnchor: [11, 11]
+    });
+    L.marker([entry.lat, entry.lng], { icon }).addTo(dashMapLayer);
+    dashMapLatLngs.push([entry.lat, entry.lng]);
+  });
+  L.polyline(dashMapLatLngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(dashMapLayer);
+  setTimeout(() => {
+    dashMap.invalidateSize();
+    dashMap.fitBounds(dashMapLatLngs, { padding: [20, 20] });
+  }, 60);
+}
+
+document.getElementById('btnOpenMap').addEventListener('click', () => showView('view-kaart'));
+document.getElementById('btnOpenTijdlijn').addEventListener('click', () => showView('view-tijdlijn'));
+
+// ============================================================
+// KAART
+// ============================================================
+let map = null, mapLayer = null, mapLatLngs = [];
+
+// De kaart wordt VOLLEDIG opnieuw opgebouwd (niet hergebruikt) telkens als het
+// tabblad wordt geopend. Dat is iets duurder, maar sluit definitief uit dat
+// Leaflet met een verkeerde interne maat blijft zitten (het "ingezoomde"
+// effect) — een probleem dat soms zelfs na invalidateSize() bleef hangen.
+function rebuildMap() {
+  if (map) {
+    try { map.remove(); } catch (e) { /* al verwijderd */ }
+    map = null;
+    mapLayer = null;
+  }
+  // Deze stijlen ook rechtstreeks vanuit JS zetten (niet alleen via het losse
+  // CSS-bestand) — zo werkt de opsluiting van Leaflets interne lagen altijd,
+  // ook als het CSS-bestand ergens onderweg nog gecached zou zijn.
+  const mapEl = document.getElementById('map');
+  mapEl.style.isolation = 'isolate';
+  mapEl.style.position = 'relative';
+  mapEl.style.overflow = 'hidden';
+
+  map = L.map('map').setView([52.1, 5.3], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 19
+  }).addTo(map);
+  mapLayer = L.layerGroup().addTo(map);
+  drawMapMarkers();
+  map.invalidateSize();
+  if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
+}
+
+function drawMapMarkers() {
+  if (!mapLayer) return;
+  mapLayer.clearLayers();
+  const withLoc = allEntries.filter(e => e.lat);
+  mapLatLngs = [];
+  if (withLoc.length === 0) return;
+
+  withLoc.forEach((entry, i) => {
+    const type = normType(entry.type);
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="map-pin-num" style="background:${TYPE_COLOR[type] || 'var(--jade)'}">${i + 1}</div>`,
+      iconSize: [26, 26], iconAnchor: [13, 13]
+    });
+    const marker = L.marker([entry.lat, entry.lng], { icon }).addTo(mapLayer);
+    marker.bindPopup(`<b>${TYPE_ICON[type]} ${escapeHtml(entry.title)}</b><br>${fmtStamp(entry.timestamp)} · ${entry.author}${entry.locationName ? '<br>' + escapeHtml(entry.locationName) : ''}`);
+    mapLatLngs.push([entry.lat, entry.lng]);
+  });
+  L.polyline(mapLatLngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(mapLayer);
+}
+
+// Als data binnenkomt terwijl het tabblad al open is, gewoon de pinnen verversen
+// (geen volledige heropbouw nodig — dat gebeurt alleen bij het openen zelf).
+function renderMap() {
+  if (!map) return;
+  if (timeMachineActive) return; // de tijdmachine bepaalt dan zelf wat zichtbaar is
+  drawMapMarkers();
+  if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
+}
+
+// ============================================================
+// TIJDMACHINE — de route/momenten dag voor dag (of moment voor moment)
+// terugspelen op de bestaande kaart. Gebruikt dezelfde map/mapLayer-instantie
+// en dezelfde reisdata (allEntries) — geen aparte datastructuur nodig.
+// ============================================================
+let timeMachineActive = false;
+let tmDays = [];          // alle unieke dagen (YYYY-MM-DD) van de hele reis, chronologisch
+let tmGeoEntries = [];    // alleen momenten mét locatie, chronologisch
+let tmPointer = -1;       // index in tmGeoEntries tot-en-met waar we nu getoond worden
+let tmPlaying = false;
+let tmPlayTimer = null;
+
+function getGeoEntries() {
+  return allEntries.filter(e => e.lat).slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+function getAllDaysList() {
+  return [...new Set(allEntries.map(e => e.timestamp.slice(0, 10)))].sort();
+}
+function tmPointerForDay(dayIndex) {
+  const dayStr = tmDays[dayIndex];
+  let p = -1;
+  for (let i = 0; i < tmGeoEntries.length; i++) {
+    if (tmGeoEntries[i].timestamp.slice(0, 10) <= dayStr) p = i; else break;
+  }
+  return p;
+}
+function tmDayIndexForPointer(pointer) {
+  if (pointer < 0 || !tmGeoEntries[pointer]) return 0;
+  const dayStr = tmGeoEntries[pointer].timestamp.slice(0, 10);
+  return Math.max(0, tmDays.indexOf(dayStr));
+}
+
+function drawTimeMachineMarkers(entriesShown) {
+  if (!map || !mapLayer) return;
+  mapLayer.clearLayers();
+  const latlngs = [];
+  entriesShown.forEach((entry, i) => {
+    const type = normType(entry.type);
+    const isCurrent = i === entriesShown.length - 1;
+    const icon = L.divIcon({
+      className: '',
+      html: `<div class="map-pin-num${isCurrent ? ' map-pin-num--current' : ''}" style="background:${TYPE_COLOR[type] || 'var(--jade)'}">${i + 1}</div>`,
+      iconSize: isCurrent ? [34, 34] : [26, 26], iconAnchor: isCurrent ? [17, 17] : [13, 13]
+    });
+    const marker = L.marker([entry.lat, entry.lng], { icon }).addTo(mapLayer);
+    marker.bindPopup(`<b>${TYPE_ICON[type]} ${escapeHtml(entry.title)}</b><br>${fmtStamp(entry.timestamp)} · ${entry.author}`);
+    latlngs.push([entry.lat, entry.lng]);
+  });
+  if (latlngs.length > 1) {
+    L.polyline(latlngs, { color: '#B23A2E', weight: 2, dashArray: '6 6', opacity: 0.8 }).addTo(mapLayer);
+  }
+  if (latlngs.length) map.panTo(latlngs[latlngs.length - 1], { animate: true });
+}
+
+function tmRenderAtPointer(pointer, showCallout) {
+  const shown = tmGeoEntries.slice(0, pointer + 1);
+  drawTimeMachineMarkers(shown);
+  const dayIdx = tmDayIndexForPointer(pointer);
+  document.getElementById('tmSlider').value = dayIdx;
+  document.getElementById('tmDayLabel').textContent = `Dag ${dayIdx + 1} van ${tmDays.length}`;
+  document.getElementById('tmDateLabel').textContent = tmDays.length ? fmtDayHeading(tmDays[dayIdx]) : '';
+  if (showCallout && pointer >= 0) tmShowCallout(tmGeoEntries[pointer]);
+}
+
+function tmShowCallout(entry) {
+  const el = document.getElementById('tmCallout');
+  const type = normType(entry.type);
+  let extra = '';
+  if (entry.highlight) extra = '<br>⭐ Beste van de reis';
+  else if (entry.rating) extra = `<br>${'★'.repeat(entry.rating)}${'☆'.repeat(5 - entry.rating)}`;
+  el.innerHTML = `<b>${fmtDayHeading(entry.timestamp.slice(0, 10))} · ${fmtTime(entry.timestamp)}</b><br>${TYPE_ICON[type]} ${escapeHtml(entry.title)}${extra}`;
+  el.hidden = false;
+  clearTimeout(tmShowCallout._t);
+  tmShowCallout._t = setTimeout(() => { el.hidden = true; }, 2200);
+}
+
+function enterTimeMachine() {
+  tmDays = getAllDaysList();
+  tmGeoEntries = getGeoEntries();
+  if (!tmGeoEntries.length) { toast('Nog geen momenten met een locatie om af te spelen'); return; }
+  if (!map) return;
+  timeMachineActive = true;
+  document.getElementById('timeMachinePanel').hidden = false;
+  document.getElementById('btnToggleTimeMachine').textContent = '🗺️ Terug naar volledige route';
+  const slider = document.getElementById('tmSlider');
+  slider.min = 0;
+  slider.max = Math.max(0, tmDays.length - 1);
+  tmPointer = tmGeoEntries.length - 1; // begin met de volledige, huidige route in beeld
+  tmRenderAtPointer(tmPointer, false);
+}
+function exitTimeMachine() {
+  timeMachineActive = false;
+  tmStopPlayback();
+  const panel = document.getElementById('timeMachinePanel');
+  if (panel) panel.hidden = true;
+  document.getElementById('tmCallout').hidden = true;
+  document.getElementById('btnToggleTimeMachine').textContent = '🕰️ Reis afspelen';
+  if (map) {
+    drawMapMarkers();
+    if (mapLatLngs.length) map.fitBounds(mapLatLngs, { padding: [30, 30] });
+  }
+}
+document.getElementById('btnToggleTimeMachine').addEventListener('click', () => {
+  timeMachineActive ? exitTimeMachine() : enterTimeMachine();
+});
+document.getElementById('tmExit').addEventListener('click', exitTimeMachine);
+
+document.getElementById('tmSlider').addEventListener('input', (e) => {
+  tmStopPlayback();
+  const dayIdx = Number(e.target.value);
+  tmPointer = tmPointerForDay(dayIdx);
+  tmRenderAtPointer(tmPointer, false);
+});
+document.getElementById('tmPrevDay').addEventListener('click', () => {
+  tmStopPlayback();
+  const curDay = tmDayIndexForPointer(tmPointer);
+  const newDay = Math.max(0, curDay - 1);
+  tmPointer = tmPointerForDay(newDay);
+  tmRenderAtPointer(tmPointer, false);
+});
+document.getElementById('tmNextDay').addEventListener('click', () => {
+  tmStopPlayback();
+  const curDay = tmDayIndexForPointer(tmPointer);
+  const newDay = Math.min(tmDays.length - 1, curDay + 1);
+  tmPointer = tmPointerForDay(newDay);
+  tmRenderAtPointer(tmPointer, false);
+});
+
+function tmStartPlayback() {
+  if (!tmGeoEntries.length) return;
+  if (tmPointer >= tmGeoEntries.length - 1) tmPointer = -1; // helemaal bij het eind: begin opnieuw
+  tmPlaying = true;
+  document.getElementById('tmPlayPause').textContent = '⏸';
+  tmPlayNext();
+}
+function tmPlayNext() {
+  if (!tmPlaying) return;
+  tmPointer++;
+  if (tmPointer >= tmGeoEntries.length) { tmStopPlayback(); return; }
+  tmRenderAtPointer(tmPointer, true);
+  tmPlayTimer = setTimeout(tmPlayNext, 1800);
+}
+function tmStopPlayback() {
+  tmPlaying = false;
+  clearTimeout(tmPlayTimer);
+  const btn = document.getElementById('tmPlayPause');
+  if (btn) btn.textContent = '▶';
+}
+document.getElementById('tmPlayPause').addEventListener('click', () => {
+  tmPlaying ? tmStopPlayback() : tmStartPlayback();
+});
+
+// ============================================================
+// OVERZICHT / STATS / REISCODE DELEN
+// ============================================================
+function renderStats() {
+  const grid = document.getElementById('statsGrid');
+  const days = new Set(allEntries.map(e => e.timestamp.slice(0, 10))).size;
+  const photos = allEntries.reduce((n, e) => n + (e.photos ? e.photos.length : 0), 0);
+  const plekken = allEntries.filter(e => normType(e.type) === 'plek').length;
+  const maaltijden = allEntries.filter(e => normType(e.type) === 'eten').length;
+  const nachtjes = allEntries.filter(e => normType(e.type) === 'slaap').length;
+  const highlights = allEntries.filter(e => e.highlight).length;
+  grid.innerHTML = `
+    <div class="stat-card" data-filter="plek"><b>0</b><span>📍 Plekken bezocht</span></div>
+    <div class="stat-card" data-filter="eten"><b>0</b><span>🍴 Maaltijden</span></div>
+    <div class="stat-card" data-filter="slaap"><b>0</b><span>🛏️ Nachtjes geslapen</span></div>
+    <div class="stat-card" data-filter="days"><b>0</b><span>Dagen vastgelegd</span></div>
+    <div class="stat-card" data-filter="photos"><b>0</b><span>Foto's</span></div>
+    <div class="stat-card" data-filter="highlights"><b>0</b><span>🏆 Beste van de reis</span></div>
+  `;
+  const vals = [plekken, maaltijden, nachtjes, days, photos, highlights];
+  grid.querySelectorAll('.stat-card b').forEach((b, i) => animateNumber(b, vals[i]));
+  staggerIn(grid.querySelectorAll('.stat-card'), 50);
+}
+
+document.getElementById('btnShareCode').addEventListener('click', async () => {
+  const text = `Doe mee met ons reisdagboek "Jut en Juul op vakantie"! Vul reiscode ${currentTripCode} in op de app.`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'Jut en Juul op vakantie', text });
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Tekst gekopieerd ✓');
+  } catch (err) {
+    toast(`Reiscode: ${currentTripCode}`);
+  }
+});
+document.getElementById('btnCopyCode').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(currentTripCode);
+    toast('Code gekopieerd ✓');
+  } catch (err) {
+    toast(`Reiscode: ${currentTripCode}`);
+  }
+});
+
+document.getElementById('btnShareStatusUpdate').addEventListener('click', () => {
+  if (currentRole === 'follower') return;
+  if (!allEntries.length) { toast('Nog geen momenten om te delen'); return; }
+  const tripName = document.getElementById('tripTitle').textContent;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todaysEntries = allEntries.filter(e => e.timestamp.slice(0, 10) === todayStr);
+  let text;
+  if (todaysEntries.length) {
+    const placesCount = todaysEntries.filter(e => normType(e.type) === 'plek').length;
+    const photosCount = todaysEntries.reduce((n, e) => n + (e.photos ? e.photos.length : 0), 0);
+    const locText = getLastKnownLocationText();
+    text = `☀️ Update van "${tripName}": vandaag ${todaysEntries.length} moment${todaysEntries.length === 1 ? '' : 'en'} vastgelegd`
+      + (placesCount ? `, ${placesCount} plek${placesCount === 1 ? '' : 'ken'} bezocht` : '')
+      + (photosCount ? `, ${photosCount} foto's` : '')
+      + (locText ? `. Nu bij ${locText}` : '')
+      + `. Bekijk het hier: ${location.href}`;
+  } else {
+    const last = allEntries[allEntries.length - 1];
+    text = `📍 Update van "${tripName}": laatste moment was "${last.title}". Bekijk alles hier: ${location.href}`;
+  }
+  shareUpdateMessage(text);
+});
+
+// ============================================================
+// SERVICE WORKER — bewust NIET meer gebruikt.
+// De app werkte hiermee ook offline, maar dit bleek in de praktijk telkens
+// oude versies van de app "vast te houden" op toestellen, wat veel verwarring
+// gaf. Omdat er altijd internet beschikbaar is bij gebruik, schrappen we deze
+// laag helemaal — en ruimen we meteen elke eerder geïnstalleerde service
+// worker actief op, zodat iedereen die 'm ooit heeft gehad er vanzelf
+// vanaf komt zonder zelf iets te hoeven doen.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((reg) => reg.unregister());
+  }).catch(() => {});
+  if (window.caches) {
+    caches.keys().then((names) => {
+      names.forEach((name) => caches.delete(name));
+    }).catch(() => {});
+  }
+}
+
+// ============================================================
+// START
+// ============================================================
+prefillDateTime();
+updateTypeFields();
+
+// Kritieke stijlen ook rechtstreeks vanuit JS forceren (los van het CSS-bestand),
+// zodat de pop-up en toast altijd boven de kaart blijven — ongeacht of het
+// losse CSS-bestand ergens nog gecached zou zijn.
+document.getElementById('entryModal').style.zIndex = '2000';
+document.getElementById('toast').style.zIndex = '3000';
