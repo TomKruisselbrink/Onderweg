@@ -178,6 +178,16 @@ iedereen die vanaf nu een probleem tegenkomt, maar iemand die al vóór deze
 update vastzat op een hele oude, gecachete pagina moet nog één keer de
 handmatige stappen doorlopen (zie hierboven) — daarna nooit meer.
 
+**Familie op de hoogte houden:** omdat echte pushmeldingen vanuit de app
+niet mogelijk zijn zonder een betaalde Firebase-uitbreiding, kun je in plaats
+daarvan met één tik een kant-en-klaar berichtje delen naar de groepsapp
+(WhatsApp, Berichten, mail — wat je zelf kiest in het native deelmenu). Dit
+gebeurt op twee plekken: automatisch aangeboden vlak na het opslaan van een
+nieuw moment ("📤 Familie laten weten"), en via een vaste knop "📤 Stuur
+statusupdate" onder Overzicht voor elk gewenst moment. Het bericht bevat
+automatisch een korte samenvatting (van vandaag, of het laatste moment) plus
+een link naar de app.
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is
