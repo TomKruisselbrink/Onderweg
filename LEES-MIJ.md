@@ -218,6 +218,20 @@ overheersende weertype van die dag (zon, regen, onweer met bliksemflits,
 sneeuw, wind, mist of bewolkt) — met pure CSS-animaties, dus geen impact op
 snelheid ook niet met veel dagen.
 
+**Geen flits meer bij het opstarten:** als je al eerder een reis hebt gekozen
+op dit toestel, zie je nu meteen een kort "Jullie reis wordt geladen…"-scherm
+in plaats van heel even het keuzescherm te zien voordat je automatisch wordt
+ingelogd.
+
+**Datum bij volgers:** onder Overzicht → "Wie volgt jullie" staat nu ook
+"sinds [datum en tijd]" bij elke naam — het moment waarop diegene voor het
+eerst is gaan meekijken (blijft vaststaan, wordt niet steeds bijgewerkt).
+
+**Overzicht opgeschoond voor volgers:** de reiscode-deel-sectie en de
+back-up-knop zijn nu ook verborgen voor volgers (naast de dingen die al
+verborgen waren) — dat zijn acties die alleen voor jullie als reizigers
+relevant zijn.
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is
