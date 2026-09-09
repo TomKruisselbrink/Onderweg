@@ -188,6 +188,13 @@ statusupdate" onder Overzicht voor elk gewenst moment. Het bericht bevat
 automatisch een korte samenvatting (van vandaag, of het laatste moment) plus
 een link naar de app.
 
+**Landsfeer:** de app herkent uit de al opgeslagen adresgegevens (geen aparte
+dienst nodig) in welk land een dag zich afspeelt, en toont daar een subtiel
+vlaggetje bij — in de Tijdlijn, het Fotoalbum, het Reisdagboek en op het
+Dashboard. Het "Vandaag"-kaartje krijgt bovendien een zachte accentkleur die
+meebeweegt met het huidige land. Onbekende landen (niet in de lijst) vallen
+gewoon terug op de vaste goudkleur — er verandert dan niets.
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is
