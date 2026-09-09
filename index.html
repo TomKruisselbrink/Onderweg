@@ -13,7 +13,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style-v37.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
+<link rel="stylesheet" href="style-v38.css">
 </head>
 <body>
 
@@ -165,7 +167,11 @@
       <h2>Tijdlijn</h2>
       <span class="count-pill" id="countPill">0 momenten</span>
     </div>
+    <div class="timeline-search">
+      <input type="text" id="timelineSearch" placeholder="🔍 Zoek op titel of tekst…">
+    </div>
     <div id="timeline" class="timeline"></div>
+    <p class="empty-state-standalone" id="timelineSearchEmpty" hidden>Niets gevonden voor deze zoekterm.</p>
     <div class="empty-state" id="emptyState">
       <p class="empty-state__stamp">leeg</p>
       <p>Nog niets vastgelegd. Klik op <strong>Nieuw moment</strong> om je eerste plek, hap of avontuur toe te voegen.</p>
@@ -399,12 +405,18 @@
     </div>
 
     <div class="panel">
+      <h3>Back-up</h3>
+      <p class="panel__hint">Download een volledige kopie van alle momenten, reacties en foto's als bestand — een verzekering los van de app zelf.</p>
+      <button class="btn btn--ghost btn--wide" id="btnDownloadBackup">📥 Download volledige back-up</button>
+    </div>
+
+    <div class="panel">
       <h3>Reis wisselen</h3>
       <p class="panel__hint">Aan een andere reis meewerken, of stoppen met meekijken? Verlaat deze reis en kies opnieuw.</p>
       <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
 
-    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 37</p>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 38</p>
   </section>
 
 </main>
@@ -439,6 +451,7 @@
 <div class="toast" id="toast" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 <script>
 // Vangt fouten op tijdens het laden/uitvoeren van de app en toont ze altijd
 // zichtbaar (via een balk bovenin, ongeacht welk scherm actief is), zodat een
@@ -499,7 +512,7 @@ window.addEventListener('unhandledrejection', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
-<script type="module" src="app-v37.js"></script>
+<script type="module" src="app-v38.js"></script>
 </body>
 </html>
 

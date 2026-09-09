@@ -195,6 +195,29 @@ Dashboard. Het "Vandaag"-kaartje krijgt bovendien een zachte accentkleur die
 meebeweegt met het huidige land. Onbekende landen (niet in de lijst) vallen
 gewoon terug op de vaste goudkleur — er verandert dan niets.
 
+**Back-up:** onder Overzicht → "📥 Download volledige back-up" krijg je een
+JSON-bestand met alle momenten, reacties en foto's — een verzekering los van
+Firebase, handig om af en toe te bewaren.
+
+**Zoeken in de Tijdlijn:** een zoekveld bovenaan de Tijdlijn filtert direct op
+titel en aantekening.
+
+**Kaart-clustering:** pinnen die dicht bij elkaar liggen bundelen nu
+automatisch tot een tikbaar bolletje met een aantal (via Leaflet.markercluster,
+dezelfde bron als de kaart zelf al gebruikt). De tijdmachine (reis afspelen)
+gebruikt bewust géén clustering, omdat daar de genummerde volgorde het punt is.
+
+**Inzoomen op foto's:** in de fotoviewer kun je nu knijpen en dubbeltikken om
+in/uit te zoomen op de foto zelf, met de mogelijkheid om rond te slepen —
+losstaand van de systeeminstelling die de rest van de app blokkeert. Vegen
+naar de volgende/vorige foto werkt zolang er niet is ingezoomd.
+
+**Weer-animatie:** de dagkop in de Tijdlijn en het "Vandaag"-kaartje op het
+Dashboard krijgen een licht geanimeerde achtergrond passend bij het
+overheersende weertype van die dag (zon, regen, onweer met bliksemflits,
+sneeuw, wind, mist of bewolkt) — met pure CSS-animaties, dus geen impact op
+snelheid ook niet met veel dagen.
+
 ## Beperkingen om te weten
 
 - Foto's zijn beperkt tot 3 per moment en worden sterk gecomprimeerd. Dit is
