@@ -49,6 +49,12 @@ service cloud.firestore {
         allow read: if request.auth != null;
         allow write: if request.auth != null && request.auth.uid == followerId;
       }
+
+      match /stays/{stayId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null
+          && request.auth.token.firebase.sign_in_provider == 'google.com';
+      }
     }
   }
 }
@@ -231,6 +237,37 @@ eerst is gaan meekijken (blijft vaststaan, wordt niet steeds bijgewerkt).
 back-up-knop zijn nu ook verborgen voor volgers (naast de dingen die al
 verborgen waren) — dat zijn acties die alleen voor jullie als reizigers
 relevant zijn.
+
+**Kaart-hoogte gefixt:** de kaart neemt nu maximaal de helft van het scherm
+in, zodat de "Reis afspelen"-knop en het paneel altijd in beeld zijn, ook op
+telefoon.
+
+**Tijdmachine start automatisch:** "Reis afspelen" begint nu vanzelf bij dag
+1 en start meteen met afspelen.
+
+**Dynamic Island / notch-ondersteuning:** de topbalk houdt nu rekening met
+de "veilige zone" bovenaan het scherm (`env(safe-area-inset-top)`) — de
+standaard, toestel-onafhankelijke CSS-oplossing hiervoor. Op iPhones met een
+Dynamic Island of notch komt er automatisch extra ruimte; op Android-
+telefoons (en oudere iPhones) verandert er niets, omdat die waarde daar op 0
+staat.
+
+**Reisdata instelbaar:** een nieuw paneel "Reisdata" onder Overzicht waar je
+de begin- en einddatum van de hele reis kunt invullen. Overal waar "Dag X"
+wordt getoond (Dashboard, familie-header, Reisdagboek) staat dan automatisch
+ook "van Y" erbij.
+
+**Verblijven-sectie:** een nieuw paneel onder Overzicht om verblijfplaatsen
+(naam + van/tot-en-met datum) bij te houden, met de huidige plek duidelijk
+gemarkeerd. Volgers zien de lijst wel, maar niet het invulformulier.
+
+⚠️ **Let op — beveiligingsregels opnieuw plakken:** de Verblijven-functie
+gebruikt een nieuwe Firestore-subcollectie (`stays`) die met de HUIDIGE
+beveiligingsregels nog niet toegankelijk is. Ga naar Firebase Console →
+Firestore Database → tabblad "Rules", en vervang de inhoud door de
+bijgewerkte regels bovenaan dit document (met het nieuwe `match /stays/{stayId}`-
+blok erin) — anders krijg je een foutmelding zodra je een verblijf probeert
+toe te voegen.
 
 ## Beperkingen om te weten
 

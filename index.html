@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
-<link rel="stylesheet" href="style-v39.css">
+<link rel="stylesheet" href="style-v40.css">
 </head>
 <body>
 
@@ -402,6 +402,42 @@ if (localStorage.getItem('tripCode')) {
     </div>
     <div class="stats-grid" id="statsGrid"></div>
 
+    <div class="panel" id="tripDatesPanel">
+      <h3>Reisdata</h3>
+      <p class="panel__hint">Vul de begin- en einddatum van de hele reis in — dan kan de app overal "Dag X van Y" tonen in plaats van alleen "Dag X".</p>
+      <div class="field-row">
+        <label class="field">
+          <span>Van</span>
+          <input type="date" id="tripStartDateInput">
+        </label>
+        <label class="field">
+          <span>Tot en met</span>
+          <input type="date" id="tripEndDateInput">
+        </label>
+      </div>
+      <button class="btn btn--ghost btn--wide" id="btnSaveTripDates">Opslaan</button>
+    </div>
+
+    <div class="panel" id="staysPanel">
+      <h3>Verblijven</h3>
+      <p class="panel__hint">Waar verblijven jullie, en van wanneer tot wanneer? Handig overzicht naast de losse momenten.</p>
+      <div id="staysList" class="stays-list"></div>
+      <div id="stayForm" class="stay-form">
+        <input type="text" id="stayNameInput" placeholder="Naam van de plek, bijv. Camping Krk" maxlength="60">
+        <div class="field-row">
+          <label class="field">
+            <span>Van</span>
+            <input type="date" id="stayStartInput">
+          </label>
+          <label class="field">
+            <span>Tot en met</span>
+            <input type="date" id="stayEndInput">
+          </label>
+        </div>
+        <button type="button" class="btn btn--primary btn--wide" id="btnAddStay">+ Verblijf toevoegen</button>
+      </div>
+    </div>
+
     <div class="panel" id="inviteCodePanel">
       <h3>Reisgenoten uitnodigen</h3>
       <p class="panel__hint">Deel deze code met je reisgenoot zodat die kan meebewerken, of met familie om read-only mee te laten kijken.</p>
@@ -434,7 +470,7 @@ if (localStorage.getItem('tripCode')) {
       <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
 
-    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 39</p>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 40</p>
   </section>
 
 </main>
@@ -530,7 +566,7 @@ window.addEventListener('unhandledrejection', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
-<script type="module" src="app-v39.js"></script>
+<script type="module" src="app-v40.js"></script>
 </body>
 </html>
 
