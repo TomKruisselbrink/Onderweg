@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
-<link rel="stylesheet" href="style-v40.css">
+<link rel="stylesheet" href="style-v41.css">
 </head>
 <body>
 
@@ -30,6 +30,11 @@
 
     <!-- Stap 1: rol kiezen -->
     <div class="onboard__step" id="obStepRole">
+      <div id="savedTripsOnboard" class="saved-trips" hidden>
+        <p class="saved-trips__label">Eerdere reizen</p>
+        <div id="savedTripsOnboardList"></div>
+        <div class="saved-trips__divider">of kies opnieuw</div>
+      </div>
       <button type="button" class="onboard__choice" id="obTraveler">
         <span class="onboard__choice-icon">🧳</span>
         <span class="onboard__choice-text">
@@ -79,7 +84,7 @@
     <!-- Stap 0: kort laadscherm voor wie al eerder een keuze heeft gemaakt —
          voorkomt dat het keuzescherm even "flitst" voor het inloggen klaar is. -->
     <div class="onboard__step" id="obStepLoading" hidden>
-      <div class="skeleton" style="width:56px; height:56px; border-radius:50%; margin:0 auto 18px;"></div>
+      <div class="onboard__spinner"></div>
       <p class="onboard__loading-text">Jullie reis wordt geladen…</p>
     </div>
 
@@ -202,10 +207,9 @@ if (localStorage.getItem('tripCode')) {
       <h2>Route</h2>
       <span class="count-pill" id="countPillMap">0 pins</span>
     </div>
+    <button type="button" class="btn btn--primary btn--wide" id="btnToggleTimeMachine" style="margin-bottom:10px;">🕰️ Reis afspelen</button>
     <div id="map"></div>
     <p class="map__note">Kaarttegels laden alleen met internet — eenmaal geladen blijven ze zichtbaar in het geheugen van je telefoon.</p>
-
-    <button type="button" class="btn btn--ghost btn--wide" id="btnToggleTimeMachine" style="margin-top:10px;">🕰️ Reis afspelen</button>
 
     <div id="timeMachinePanel" class="time-machine" hidden>
       <div class="time-machine__label">
@@ -467,10 +471,14 @@ if (localStorage.getItem('tripCode')) {
     <div class="panel">
       <h3>Reis wisselen</h3>
       <p class="panel__hint">Aan een andere reis meewerken, of stoppen met meekijken? Verlaat deze reis en kies opnieuw.</p>
+      <div id="savedTripsOverzicht" class="saved-trips" hidden>
+        <p class="saved-trips__label">Snel wisselen naar een eerdere reis</p>
+        <div id="savedTripsOverzichtList"></div>
+      </div>
       <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
 
-    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 40</p>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 41</p>
   </section>
 
 </main>
@@ -566,7 +574,7 @@ window.addEventListener('unhandledrejection', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
-<script type="module" src="app-v40.js"></script>
+<script type="module" src="app-v41.js"></script>
 </body>
 </html>
 

@@ -40,6 +40,8 @@ service cloud.firestore {
       match /comments/{commentId} {
         allow read: if request.auth != null;
         allow create: if request.auth != null;
+        allow update: if request.auth != null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']);
         allow delete: if request.auth != null
           && (resource.data.authorUid == request.auth.uid
               || request.auth.token.firebase.sign_in_provider == 'google.com');
@@ -268,6 +270,33 @@ Firestore Database → tabblad "Rules", en vervang de inhoud door de
 bijgewerkte regels bovenaan dit document (met het nieuwe `match /stays/{stayId}`-
 blok erin) — anders krijg je een foutmelding zodra je een verblijf probeert
 toe te voegen.
+
+**Reis afspelen — foto en betere plek:** de knop staat nu boven de kaart in
+plaats van eronder, zodat hij altijd meteen zichtbaar is. Tijdens het
+afspelen zie je bij elk moment met een foto nu ook een klein voorbeeld ervan
+in het tekstballonnetje.
+
+**Duidelijke laadanimatie:** het "Jullie reis wordt geladen…"-scherm heeft nu
+een goed zichtbare, ronddraaiende spinner in plaats van een nauwelijks
+zichtbare shimmer-animatie.
+
+**Reacties liken:** onder elke reactie (en elk antwoord) staat nu een
+hartje — tik erop om te liken/unliken, met een teller zodra er meer dan één
+like is.
+
+⚠️ **Let op — nog een keer beveiligingsregels plakken:** het liken van
+reacties vereist een extra regel (`allow update` op `/comments/`) die er nog
+niet stond. Plak de volledige, bijgewerkte regels bovenaan dit document
+opnieuw in Firebase Console → Firestore Database → "Rules" — zonder deze
+stap werkt liken niet en krijg je een foutmelding.
+
+**Meerdere reizen bijhouden:** dit toestel onthoudt nu elke reis waar je
+ooit bent ingelogd (naam, code, rol — lokaal opgeslagen, niet gedeeld met
+anderen). Bij het keuzescherm (als je nog geen actieve reis hebt) én onder
+Overzicht → "Reis wisselen" zie je een lijst "Eerdere reizen" om er met één
+tik naartoe te wisselen, zonder de code opnieuw te hoeven intypen. Bij
+Overzicht kun je een reis uit de lijst ook vergeten (het kruisje) — dat
+verwijdert 'm alleen uit dit lijstje op dit toestel, niet de reis zelf.
 
 ## Beperkingen om te weten
 
