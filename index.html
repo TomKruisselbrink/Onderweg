@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
-<link rel="stylesheet" href="style-v41.css">
+<link rel="stylesheet" href="style-v42.css">
 </head>
 <body>
 
@@ -478,7 +478,7 @@ if (localStorage.getItem('tripCode')) {
       <button class="btn btn--ghost btn--wide" id="btnLeaveTrip">🚪 Verlaat deze reis</button>
     </div>
 
-    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 41</p>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:10px; color:#b6bdb8; margin-top:8px;">App-versie 42</p>
   </section>
 
 </main>
@@ -500,7 +500,7 @@ if (localStorage.getItem('tripCode')) {
 <div class="photo-viewer" id="photoViewer" hidden>
   <button type="button" class="photo-viewer__close" id="btnClosePhotoViewer">✕</button>
   <div class="photo-viewer__img-wrap">
-    <img id="photoViewerImg" src="" alt="">
+    <img id="photoViewerImg" alt="">
   </div>
   <button type="button" class="photo-viewer__nav photo-viewer__nav--prev" id="btnPhotoPrev">‹</button>
   <button type="button" class="photo-viewer__nav photo-viewer__nav--next" id="btnPhotoNext">›</button>
@@ -574,7 +574,7 @@ window.addEventListener('unhandledrejection', function (e) {
   showGlobalError('Er ging iets mis: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
 });
 </script>
-<script type="module" src="app-v41.js"></script>
+<script type="module" src="app-v42.js"></script>
 </body>
 </html>
 
